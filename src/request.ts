@@ -16,4 +16,7 @@ export class TWAlertDto {
   @Type(() => Number)
   @IsNumber()
   price: number;
+
+  buyCoef: number | undefined;
+  sellCoef: number | undefined;
 }
