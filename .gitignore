@@ -57,3 +57,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 ngrok.exe
 trades.json
 start-all.js
+src/tw-scripts/

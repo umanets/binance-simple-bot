@@ -16,7 +16,7 @@ export class AppController {
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async processAlert(@Body() request: TWAlertDto) {
     console.log(
-      `request: ${new Date().toLocaleTimeString()} === ${request.ticker}: ${request.direction}, lotCount: ${request.lotCount}`,
+      `request: ${new Date().toLocaleTimeString()} === ${request.ticker}: ${request.direction}, price: ${request.price}, buyCoef: ${request.buyCoef}, sellCoef: ${request.sellCoef}`
     );
     try {
       if (request.direction === 'aSell') {

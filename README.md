@@ -53,20 +53,23 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 **Payload parameters:**
 - `ticker`: trading pair, e.g. `"BTCUSDT"`
 - `direction`: `"aBuy"` or `"aSell"`
-- `lotCount`: **Number** — amount of the _base asset_ to buy or sell.  
-  For example, for `BTCUSDT`, `lotCount` means BTC quantity (not USD).
+- `price`: **Number** — the asset price at signal time (recorded for logging)
+- `buyCoef`: **Number** — multi-timeframe buy confidence coefficient
+- `sellCoef`: **Number** — multi-timeframe sell confidence coefficient
 
 **Example:**
 ```json
 {
   "ticker": "BTCUSDT",
   "direction": "aBuy",
-  "lotCount": 0.02   // will buy 0.02 BTC
+  "price": 45000,
+  "buyCoef": 12,
+  "sellCoef": 5
 }
 ```
 
 - On a buy signal (direction: "aBuy"), the bot will:
-    - Place a spot market order to buy the specified ticker and quantity.
+    - Compute position size from total USDT balance, confidence coefficients (buyCoef/sellCoef), and step-size, then place a spot market order accordingly.
     - Save the actual executed quantity and price to the local trade log (JSON file).
 - On a sell signal (direction: "aSell"), the bot will:
     - Retrieve previous buy trades for the ticker.
@@ -74,6 +77,6 @@ This is a minimal REST backend service built with NestJS designed to act as a si
     - Remove matching buy trades from the log upon selling.
 
 ## What this service is NOT
-- No strategy logic, no buy/sell decision making, no market analysis.
+- No signal generation or strategy logic—signals (`aBuy`/`aSell` + coefficients) must come from external sources (e.g. TradingView).
 - You must provide the signal source (e.g. a TradingView webhook, custom script, or other automation).
 - Not suitable for futures/margin trading. Only supports spot Binance.

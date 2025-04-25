@@ -23,7 +23,33 @@ export class AppService {
       const oldAvgPrice = sumQty > 0 ? sumPriceQty / sumQty : 0;
       const marketPrice = await binance.get_price(request.ticker);
 
-      const buyQty = request.lotCount;
+      // compute per-symbol USDT allocation (static divisor=15)
+      const totalUSDT = await binance.totalBalanceUSDT();
+      const freeUSDT = await binance.freeBalanceUSDT();
+      const divisor = 15;
+      const perCoinUSDT = totalUSDT / divisor;
+      // base quantity in asset terms
+      const baseQty = perCoinUSDT / marketPrice;
+      // ensure we meet minimum lot size
+      const stepSize = await binance.step(request.ticker);
+      let adjBaseQty = baseQty;
+      if (adjBaseQty < stepSize) adjBaseQty = stepSize;
+      // dynamic sizing: direct-linear based solely on buyCoef (0..64)
+      const maxCoef = 64;
+      let uBuy = request.buyCoef / maxCoef;
+      uBuy = Math.max(0, Math.min(1, uBuy));
+      const factor = 1 + uBuy;  // factor in [1..2]
+      // raw buy quantity
+      let buyQty = adjBaseQty * factor;
+      if (buyQty < stepSize) buyQty = stepSize;
+      // ensure sufficient funds; abort if not
+      const requiredUSDT = buyQty * marketPrice;
+      if (requiredUSDT > freeUSDT) {
+        console.log(
+          `Buy aborted: insufficient USDT (need ${requiredUSDT.toFixed(2)}, have ${freeUSDT.toFixed(2)})`
+        );
+        return undefined;
+      }
       const buyPrice = marketPrice;
       const newSumQty = sumQty + buyQty;
       const newSumPriceQty = sumPriceQty + buyPrice * buyQty;
@@ -37,7 +63,7 @@ export class AppService {
       }
 
       const qtyNormalized = await this.normalizeToStep(
-        request.lotCount,
+        buyQty,
         request.ticker,
       );
       const order = await binance.buy(request.ticker, qtyNormalized);
@@ -96,15 +122,52 @@ export class AppService {
     }
 
     const qty = allQty < sumQty ? allQty : sumQty;
-    if (qty > 0) {
-      const qtyNorm = await this.normalizeToStep(qty, request.ticker);
+    // dynamic sizing: direct-linear based solely on sellCoef (0..64)
+    const maxCoef = 64;
+    let uSell = request.sellCoef / maxCoef;
+    uSell = Math.max(0, Math.min(1, uSell));
+    const sellFactor = 1 + uSell;  // factor in [1..2]
+    const sellQty = Math.min(qty * sellFactor, allQty);
+    if (sellQty > 0) {
+      const qtyNorm = await this.normalizeToStep(sellQty, request.ticker);
       try {
         const order = await binance.sell(request.ticker, qtyNorm, currentPrice);
-        await this.tradeLogger.removeTrades(selectedTrades);
+        // Partial‐sell: remove only the consumed portions of the selected trades, keep leftovers
+        const soldQty = qtyNorm;
+        let remainingToSell = soldQty;
+        const consumed: TradeLogEntry[] = [];
+        const leftovers: TradeLogEntry[] = [];
+        for (const t of selectedTrades) {
+          if (remainingToSell <= 0) break;
+          if (t.qty <= remainingToSell) {
+            consumed.push(t);
+            remainingToSell -= t.qty;
+          } else {
+            // partially consume this trade entry
+            consumed.push(t);
+            const leftoverQty = t.qty - remainingToSell;
+            leftovers.push({ ticker: t.ticker, qty: leftoverQty, price: t.price, time: t.time });
+            remainingToSell = 0;
+            break;
+          }
+        }
+        // remove fully (or partially) consumed original entries
+        await this.tradeLogger.removeTrades(consumed);
+        // re-append any leftover qty from a partially consumed trade (with dust-cleanup)
+        for (const lf of leftovers) {
+          if (lf.qty >= step) {
+            await this.tradeLogger.appendTrade(lf);
+          } else {
+            console.log(
+              `[Dust cleanup] Dropped leftover ${lf.qty} of ${request.ticker} since it's below step ${step}`
+            );
+          }
+        }
         console.log(
           'Limit sell order placed at',
           currentPrice,
-          'and removed from logs',
+          'sold:', soldQty,
+          're-stored leftovers:', leftovers.map(l => l.qty)
         );
         return order;
       } catch (e) {

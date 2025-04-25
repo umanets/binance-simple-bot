@@ -63,4 +63,37 @@ async function base_currency_balance(ticker: string) {
   return result;
 }
 
-export { get_price, buy, sell, step, base_currency_balance };
+async function totalBalanceUSDT(): Promise<number> {
+  const account = await client.accountInfo();
+  const balances = account.balances.filter((b) => parseFloat(b.free) > 0);
+  const prices = await client.prices();
+  let total = 0;
+  for (const b of balances) {
+    const asset = b.asset;
+    const free = parseFloat(b.free);
+    if (asset === QUOTE_CURRENCY) {
+      total += free;
+    } else {
+      const pair = asset + QUOTE_CURRENCY;
+      const price = parseFloat(prices[pair] ?? '0');
+      if (price > 0) total += free * price;
+    }
+  }
+  return total;
+}
+
+async function freeBalanceUSDT(): Promise<number> {
+  const account = await client.accountInfo();
+  const usdt = account.balances.find((b) => b.asset === QUOTE_CURRENCY);
+  return usdt ? parseFloat(usdt.free) : 0;
+}
+
+export {
+  get_price,
+  buy,
+  sell,
+  step,
+  base_currency_balance,
+  totalBalanceUSDT,
+  freeBalanceUSDT,
+};
