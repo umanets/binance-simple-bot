@@ -15,9 +15,14 @@ export class AppController {
   @Post('alert')
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async processAlert(@Body() request: TWAlertDto) {
+    // Log full incoming payload
+    const timestamp = new Date().toLocaleTimeString();
     console.log(
-      `request: ${new Date().toLocaleTimeString()} === ${request.ticker}: ${request.direction}, price: ${request.price}, buyCoef: ${request.buyCoef}, sellCoef: ${request.sellCoef}`
+      `Request @ ${timestamp} — payload: ${JSON.stringify(request)}`
     );
+    // Calculate and log dynamic shrink coefficient k
+    const k = this.appService.calcK(request);
+    console.log(`Calculated shrink coefficient k: ${k.toFixed(4)}`);
     try {
       if (request.direction === 'aSell') {
         const result = await this.appService.sellLot(request);

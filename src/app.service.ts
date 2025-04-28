@@ -3,6 +3,9 @@ import { Order } from 'binance-api-node';
 import { TWAlertDto } from './request';
 import { TradeLogEntry, TradeLoggerService } from './trade-logger.service';
 import { GhostTradeService, GhostTradeEntry } from './ghost-trade.service';
+import { SignalLoggerService, SignalLogEntry } from './signal-logger.service';
+import { PredictionService } from './prediction.service';
+import { CandleChartInterval } from 'binance-api-node';
 
 import * as binance from './binance';
 
@@ -25,6 +28,8 @@ export class AppService {
   constructor(
     private readonly tradeLogger: TradeLoggerService,
     private readonly ghostService: GhostTradeService,
+    private readonly signalLogger: SignalLoggerService,
+    private readonly predictionService: PredictionService,
   ) {}
 
   async buyLot(request: TWAlertDto): Promise<Order | undefined> {
@@ -47,6 +52,28 @@ export class AppService {
       const initialFib = this.fibonacci(tradeCount);
       const fibN = initialFib / (1 + k * a);
       const nextStepCoef = 1 - fibN * 0.01;
+      // Prepare base log entry for this signal
+      const logEntry: SignalLogEntry = {
+        timestamp: new Date().toISOString(),
+        ticker: request.ticker,
+        direction: request.direction,
+        price: request.price,
+        buyCoef: request.buyCoef,
+        sellCoef: request.sellCoef,
+        atr: request.atr,
+        stdev: request.stdev,
+        volRatio: request.volRatio,
+        reliability: request.reliability,
+        ghostBuys,
+        ghostSells,
+        ghostPairsCount,
+        tradeCount,
+        initialFib,
+        a,
+        k,
+        fibN,
+        nextStepCoef,
+      };
       const sumQty = trades.reduce((sum, t) => sum + t.qty, 0);
       const sumPriceQty = trades.reduce((sum, t) => sum + t.price * t.qty, 0);
       const oldAvgPrice = sumQty > 0 ? sumPriceQty / sumQty : 0;
@@ -88,7 +115,12 @@ export class AppService {
         console.log(
           `Buy rejected: new average price (${newAvgPrice.toFixed(8)}) is not at least ${(100 - nextStepCoef * 100).toFixed(1)}% lower than previous average (${oldAvgPrice.toFixed(8)})`,
         );
-        // Record ghost buy attempt
+        // On ghost buy: fetch recent candles and log full context
+        // On ghost buy: fetch recent candles, log full context and request LLM prediction
+        logEntry.candles = await binance.getCandles(request.ticker, CandleChartInterval.ONE_MINUTE, 720);
+        await this.signalLogger.appendSignal(logEntry);
+        await this.predictionService.predict(logEntry);
+        // Record ghost buy
         await this.ghostService.addGhostBuyTrade({ ticker: request.ticker, price: buyPrice });
         return undefined;
       }
@@ -109,7 +141,7 @@ export class AppService {
         time: new Date().toISOString(),
       });
       console.log(' === BOUGHT ONE ' + request.ticker + '=== ');
-      // On real purchase, clear any ghost records for this ticker
+      // On real purchase, clear ghost records and log success
       await this.ghostService.removeTradesByTicker(request.ticker);
       return order;
     } catch (e) {
@@ -118,6 +150,40 @@ export class AppService {
   }
 
   async sellLot(request: TWAlertDto): Promise<Order | undefined> {
+    // Compute signal context for logging
+    const allTrades = await this.tradeLogger.getAllTrades();
+    const tradesForTicker = allTrades.filter(t => t.ticker === request.ticker);
+    const tradeCount = tradesForTicker.length;
+    const ghostBuys = (await this.ghostService.getGhostBuyTrades()).filter(g => g.ticker === request.ticker).length;
+    const ghostSells = (await this.ghostService.getGhostSellTrades()).filter(g => g.ticker === request.ticker).length;
+    const ghostPairsCount = Math.min(ghostBuys, ghostSells);
+    const k = this.calcK(request);
+    const a = Math.max(0, ghostPairsCount - tradeCount);
+    const initialFib = this.fibonacci(tradeCount);
+    const fibN = initialFib / (1 + k * a);
+    const nextStepCoef = 1 - fibN * 0.01;
+    // Prepare base log entry
+    const logEntry: SignalLogEntry = {
+      timestamp: new Date().toISOString(),
+      ticker: request.ticker,
+      direction: request.direction,
+      price: request.price,
+      buyCoef: request.buyCoef,
+      sellCoef: request.sellCoef,
+      atr: request.atr,
+      stdev: request.stdev,
+      volRatio: request.volRatio,
+      reliability: request.reliability,
+      ghostBuys,
+      ghostSells,
+      ghostPairsCount,
+      tradeCount,
+      initialFib,
+      a,
+      k,
+      fibN,
+      nextStepCoef,
+    };
     const currentPrice = await binance.get_price(request.ticker);
     if (!currentPrice) {
       throw new Error('Unable to fetch current price.');
@@ -138,7 +204,10 @@ export class AppService {
     );
     if (selectedTrades.length == 0) {
       console.log('No eligible orders to sell');
-      // Record ghost sell attempt
+      // On ghost sell: fetch recent candles and log full context
+      // On ghost sell: fetch recent candles, log context and request LLM prediction
+      logEntry.candles = await binance.getCandles(request.ticker, CandleChartInterval.ONE_MINUTE, 720);
+      // Record ghost sell
       await this.ghostService.addGhostSellTrade({ ticker: request.ticker, price: currentPrice });
       return;
     }
@@ -205,7 +274,7 @@ export class AppService {
           'sold:', soldQty,
           're-stored leftovers:', leftovers.map(l => l.qty)
         );
-        // On real sale, clear any ghost records for this ticker
+        // On real sale, clear ghost records and log success
         await this.ghostService.removeTradesByTicker(request.ticker);
         return order;
       } catch (e) {
@@ -264,7 +333,7 @@ export class AppService {
   }
   
   // Calculate dynamic shrink coefficient k based on alert metrics
-  private calcK(request: TWAlertDto): number {
+  public calcK(request: TWAlertDto): number {
     const { atr, stdev, volRatio, reliability } = request;
     const p = DYNAMIC_K_PARAMS;
     // Normalize metrics

@@ -1,4 +1,4 @@
-import Binance, { NewOrderSpot, SymbolFilterType } from 'binance-api-node';
+import Binance, { NewOrderSpot, SymbolFilterType, CandleChartInterval } from 'binance-api-node';
 
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -88,6 +88,23 @@ async function freeBalanceUSDT(): Promise<number> {
   return usdt ? parseFloat(usdt.free) : 0;
 }
 
+// Fetch recent candlestick data
+async function getCandles(
+  symbol: string,
+  interval: CandleChartInterval,
+  limit: number,
+): Promise<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }[]> {
+  const raw = await client.candles({ symbol, interval, limit });
+  return raw.map(c => ({
+    openTime: c.openTime,
+    open: parseFloat(c.open),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    close: parseFloat(c.close),
+    volume: parseFloat(c.volume),
+  }));
+}
+
 export {
   get_price,
   buy,
@@ -96,4 +113,5 @@ export {
   base_currency_balance,
   totalBalanceUSDT,
   freeBalanceUSDT,
+  getCandles,
 };

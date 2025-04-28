@@ -92,3 +92,37 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 - No signal generation or strategy logic—signals (`aBuy`/`aSell` + coefficients) must come from external sources (e.g. TradingView).
 - You must provide the signal source (e.g. a TradingView webhook, custom script, or other automation).
 - Not suitable for futures/margin trading. Only supports spot Binance.
+  
+---
+  
+## LLM-augmented Prediction Service
+
+In addition to executing raw webhook signals, this bot now includes an OpenAI-based prediction layer for *buy* signals:
+
+- **Signal Logging**: All incoming buy-signals are logged to `signals_log.json` with full feature context and recent candle history.
+- **Prompt Generation**: A compact JSON prompt (with key metrics and zig-zag pivot points) is built and sent to GPT-4 to obtain entry, stop-loss, and take-profit levels.
+- **Prediction Storage**: The predictions (`{ ticker, time, entry, stop_loss, take_profit, executed }`) are stored in `predictions.json`.  
+  - Only **aBuy** signals trigger LLM calls; new predictions replace unexecuted entries for the same ticker.
+- **Post-Processing**:  
+  1. LLM stop_loss becomes the new entry price.  
+  2. True stop_loss is set to the lowest zig-zag low pivot extracted from recent candles.  
+  3. An `executed` flag is initialized to `false`.
+
+## Live Prediction Executor
+
+The `PredictionExecutorService` dynamically watches `predictions.json` and manages Binance WebSocket subscriptions:
+
+- **Dynamic Subscriptions**: Automatically subscribes to new tickers and unsubscribes removed ones via `fs.watch`.
+- **Automated BUY**: When price ≤ `entry` and `executed=false`, it places a market BUY of `(2 × minNotional/price)`, aligns to lot size, sets `executed=true`, and records actual fill quantity and average price.
+- **Automated SELL**: Once `executed=true`, monitors for price ≥ `take_profit` or ≤ `stop_loss` to place a limit SELL at the trigger price for the exact bought quantity.
+- **Execution Logs**: Completed buy/sell cycles are appended to `prediction-orders.json` as `{ ticker, signalTime, buyPrice, qty, sellTime, sellPrice, profit }`.
+- **Signal Labeling**: Upon sell execution, the original signal in `signals_log.json` is labeled with its `profit` and written to `signals_log_labeled.json`, creating a ready-made dataset for analysis and ML.
+
+## Data Files
+
+- `signals_log.json`: Raw signal entries with full context for each webhook alert.  
+- `signals_log_labeled.json`: Signals augmented with realized profit for EDA or ML training.  
+- `predictions.json`: Latest LLM predictions per ticker (including `executed` status).  
+- `prediction-orders.json`: Execution history of prediction-based trades and their P&L.
+
+Refer to the `src` directory for full implementation details of prompt building, zig-zag pivot logic, and WebSocket handlers.

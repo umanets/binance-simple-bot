@@ -60,3 +60,8 @@ start-all.js
 src/tw-scripts/
 ghost_buy_trades.json
 ghost_sell_trades.json
+predictions.json
+prediction-orders.json
+TODO.md
+signals_log_labeled.json
+signals_log.json
