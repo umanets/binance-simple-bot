@@ -58,3 +58,5 @@ ngrok.exe
 trades.json
 start-all.js
 src/tw-scripts/
+ghost_buy_trades.json
+ghost_sell_trades.json

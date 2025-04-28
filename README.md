@@ -22,6 +22,9 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 - The logic is stateless: every buy trade is stored, not calculated from position.
 - **No trading strategy/decision-making is implemented.**  
   This service acts only as a trade execution and logging backend.
+- Maintains ghost buy/sell logs in `ghost_buy_trades.json` and `ghost_sell_trades.json`: records rejected buy/sell signals for adaptive thresholding.
+- Exposes service methods `getGhostBuyTrades()` and `getGhostSellTrades()` to retrieve current ghost entries.
+- Computes a dynamic shrink coefficient `k` from incoming signal metrics (`atr`, `stdev`, `volRatio`, `reliability`) to adapt average-price thresholds per ticker.
 
 ---
 
@@ -51,30 +54,39 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 **POST** a JSON payload to `/api/alert`
 
 **Payload parameters:**
-- `ticker`: trading pair, e.g. `"BTCUSDT"`
-- `direction`: `"aBuy"` or `"aSell"`
+- `ticker`: **String** — trading pair, e.g. `"BTCUSDT"`
+- `direction`: **String** — `"aBuy"` or `"aSell"`
 - `price`: **Number** — the asset price at signal time (recorded for logging)
 - `buyCoef`: **Number** — multi-timeframe buy confidence coefficient
 - `sellCoef`: **Number** — multi-timeframe sell confidence coefficient
+- `atr`: **Number** — normalized ATR (e.g. ATR(14)/price)
+- `stdev`: **Number** — standard deviation of log-returns
+- `volRatio`: **Number** — volume / average volume (e.g. volume / sma(volume,20))
+- `reliability`: **Number** — recent win rate of signals (0..1)
 
-**Example:**
+**Example (extended payload):**
 ```json
 {
-  "ticker": "BTCUSDT",
-  "direction": "aBuy",
-  "price": 45000,
-  "buyCoef": 12,
-  "sellCoef": 5
+  "ticker":     "BTCUSDT",
+  "direction":  "aBuy",
+  "price":      60000,
+  "buyCoef":    40,
+  "sellCoef":   0,
+  "atr":        0.0015,
+  "stdev":      0.0250,
+  "volRatio":   1.20,
+  "reliability":0.78
 }
 ```
 
 - On a buy signal (direction: "aBuy"), the bot will:
-    - Compute position size from total USDT balance, confidence coefficients (buyCoef/sellCoef), and step-size, then place a spot market order accordingly.
-    - Save the actual executed quantity and price to the local trade log (JSON file).
+    - Compute a dynamic shrink threshold `k` from incoming metrics (`atr`, `stdev`, `volRatio`, `reliability`) and per-ticker Fibonacci/ghost counts, then determine if the new average price meets the adjusted discount requirement.
+    - If the condition fails (rejected due to average price threshold), record a *ghost buy* entry `{ticker, price}` in `ghost_buy_trades.json`.
+    - Otherwise, place a spot market order for computed size, save the executed quantity and price to the trade log, and clear any ghost entries for that ticker.
 - On a sell signal (direction: "aSell"), the bot will:
-    - Retrieve previous buy trades for the ticker.
-    - Aggregate buy records and execute a sell only if breakeven (with commission) is possible.
-    - Remove matching buy trades from the log upon selling.
+    - Compute dynamic threshold `k` similarly, and select sellable buy records that allow breakeven (accounting commissions).
+    - If no eligible orders to sell, record a *ghost sell* entry `{ticker, price}` in `ghost_sell_trades.json`.
+    - Otherwise, place a sell order, remove consumed buy-log entries, store any leftovers, clear any ghost entries for that ticker, and perform dust cleanup.
 
 ## What this service is NOT
 - No signal generation or strategy logic—signals (`aBuy`/`aSell` + coefficients) must come from external sources (e.g. TradingView).

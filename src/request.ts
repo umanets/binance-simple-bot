@@ -9,7 +9,6 @@ export class TWAlertDto {
   @IsIn(['aBuy', 'aSell'])
   direction: 'aBuy' | 'aSell';
 
-
   @Type(() => Number)
   @IsNumber()
   price: number;
@@ -21,4 +20,20 @@ export class TWAlertDto {
   @Type(() => Number)
   @IsNumber()
   sellCoef: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  atr: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  stdev: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  volRatio: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  reliability: number;
 }
