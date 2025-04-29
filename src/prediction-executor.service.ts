@@ -105,8 +105,9 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
     const info = await this.client.exchangeInfo();
     const sym = info.symbols.find(s => s.symbol === ticker);
     if (!sym) return;
+    // Support both legacy MIN_NOTIONAL and newer NOTIONAL filter types
     const minNotionalF = sym.filters.find(
-      (f: any) => f.filterType === 'MIN_NOTIONAL'
+      (f: any) => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL'
     ) as any;
     const lotSizeF = sym.filters.find(
       (f: any) => f.filterType === 'LOT_SIZE'
