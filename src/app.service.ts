@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Order } from 'binance-api-node';
 import { TWAlertDto } from './request';
-import { TradeLogEntry, TradeLoggerService } from './trade-logger.service';
-import { GhostTradeService, GhostTradeEntry } from './ghost-trade.service';
-import { SignalLoggerService, SignalLogEntry } from './signal-logger.service';
+import { TradeLogEntry, TradeLoggerService } from './data-services/trade-logger.service';
+import { GhostTradeService } from './data-services/ghost-trade.service';
+import { SignalLoggerService, SignalLogEntry } from './data-services/signal-logger.service';
 import { PredictionService } from './prediction.service';
 import { CandleChartInterval } from 'binance-api-node';
 
@@ -82,7 +82,7 @@ export class AppService {
       // compute per-symbol USDT allocation (static divisor=15)
       const totalUSDT = await binance.totalBalanceUSDT();
       const freeUSDT = await binance.freeBalanceUSDT();
-      const divisor = 15;
+      const divisor = 30; // todo: can be reduced to 15 after tests
       const perCoinUSDT = totalUSDT / divisor;
       // base quantity in asset terms
       const baseQty = perCoinUSDT / marketPrice;
@@ -95,8 +95,17 @@ export class AppService {
       let uBuy = request.buyCoef / maxCoef;
       uBuy = Math.max(0, Math.min(1, uBuy));
       const factor = 1 + uBuy;  // factor in [1..2]
+      // size factor by magnitude
+      const [LP, GP] = this.calcLocalGlobalPower(request)
+      const sizeFactor = (LP + GP + 2) / 2
+      let buyQty = adjBaseQty * factor * sizeFactor;
+      console.log("=================");
+      console.log(`LP: ${LP}, GP: ${GP}`)
+      console.log(`LP_GP SIZE FACTOR: ${sizeFactor}`)
+      console.log(`LOT SIZE IN QUOTED: ${buyQty * marketPrice}`)
+      console.log("=================")
       // raw buy quantity
-      let buyQty = adjBaseQty * factor;
+      
       if (buyQty < stepSize) buyQty = stepSize;
       // ensure sufficient funds; abort if not
       const requiredUSDT = buyQty * marketPrice;
@@ -348,5 +357,185 @@ export class AppService {
     // Clamp to [minK, maxK]
     rawK = Math.max(p.minK, Math.min(rawK, p.maxK));
     return rawK;
+  }
+  
+  /**
+   * Calculate magnetic power magnitude based on multi-timeframe EMA bands.
+   * Assumes request contains tfDir, tfUpperVal, tfLowerVal, ... tf5Dir, tf5UpperVal, tf5LowerVal.
+   * Returns a normalized magnitude in [0..1].
+   */
+  public calcMagneticPower(request: TWAlertDto): number {
+    const price = request.price;
+    const weights = [1, 2, 3, 4, 5, 6];
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    const dirs = [
+      request.tfDir,
+      request.tf1Dir,
+      request.tf2Dir,
+      request.tf3Dir,
+      request.tf4Dir,
+      request.tf5Dir,
+    ];
+    const uppers = [
+      request.tfUpperVal,
+      request.tf1UpperVal,
+      request.tf2UpperVal,
+      request.tf3UpperVal,
+      request.tf4UpperVal,
+      request.tf5UpperVal,
+    ];
+    const lowers = [
+      request.tfLowerVal,
+      request.tf1LowerVal,
+      request.tf2LowerVal,
+      request.tf3LowerVal,
+      request.tf4LowerVal,
+      request.tf5LowerVal,
+    ];
+    let weightedSum = 0;
+    for (let i = 0; i < weights.length; i++) {
+      const dirStr = dirs[i] || '';
+      // Handle inner-band cases: isInnerUp (0→1), isInnerDown (0→-1), legacy isInner (-1→+1)
+      if (dirStr.startsWith('isInner')) {
+        const lower = lowers[i], upper = uppers[i];
+        const denom = upper - lower;
+        if (denom > 0) {
+          let pNorm = (price - lower) / denom;
+          pNorm = Math.max(0, Math.min(pNorm, 1));
+          let pScaled = 0;
+          if (dirStr === 'isInnerUp') {
+            pScaled = pNorm;
+          } else if (dirStr === 'isInnerDown') {
+            pScaled = -pNorm;
+          } else {
+            pScaled = pNorm * 2 - 1;
+          }
+          weightedSum += weights[i] * pScaled;
+        }
+        continue;
+      }
+      // Determine directional sign
+      let dir = 0;
+      if (dirStr === 'isUp') dir = 1;
+      else if (dirStr === 'isDown') dir = -1;
+      else {
+        const s = dirStr.toLowerCase();
+        if (s.includes('up')) dir = 1;
+        else if (s.includes('down')) dir = -1;
+      }
+      if (dir === 0) continue;
+      // Proximity factor inside the band [0..1]
+      const lower = lowers[i], upper = uppers[i];
+      const denom = upper - lower;
+      let p = 0;
+      if (denom > 0) {
+        p = (price - lower) / denom;
+        p = Math.max(0, Math.min(p, 1));
+      }
+      weightedSum += weights[i] * dir * p;
+    }
+    return weightSum > 0 ? weightedSum / weightSum : 0;
+  }
+  
+  /**
+   * Compute separate local and global magnetic powers.
+   * Local: first three TFs (1m,5m,15m) weights [1,2,3].
+   * Global: last three TFs (1h,4h,1d) weights [3,5,8].
+   * Returns tuple [localPower, globalPower] in [-1..1].
+   */
+  public calcLocalGlobalPower(request: TWAlertDto): [number, number] {
+    const price = request.price;
+    const dirs = [
+      request.tfDir, request.tf1Dir, request.tf2Dir,
+      request.tf3Dir, request.tf4Dir, request.tf5Dir
+    ];
+    const uppers = [
+      request.tfUpperVal, request.tf1UpperVal, request.tf2UpperVal,
+      request.tf3UpperVal, request.tf4UpperVal, request.tf5UpperVal
+    ];
+    const lowers = [
+      request.tfLowerVal, request.tf1LowerVal, request.tf2LowerVal,
+      request.tf3LowerVal, request.tf4LowerVal, request.tf5LowerVal
+    ];
+    const lokW = [1, 2, 3];
+    const globW = [3, 5, 8];
+    const sumLok = lokW.reduce((a, b) => a + b, 0);
+    const sumGlob = globW.reduce((a, b) => a + b, 0);
+    let wLok = 0;
+    let wGlob = 0;
+    // local (indices 0..2)
+    for (let i = 0; i < lokW.length; i++) {
+      const w = lokW[i];
+      const dirStr = dirs[i] || '';
+      if (dirStr.startsWith('isInner')) {
+        const lower = lowers[i], upper = uppers[i], d = upper - lower;
+        if (d > 0) {
+          let pNorm = (price - lower) / d;
+          pNorm = Math.max(0, Math.min(1, pNorm));
+          let pScaled = 0;
+          if (dirStr === 'isInnerUp') {
+            pScaled = pNorm;
+          } else if (dirStr === 'isInnerDown') {
+            pScaled = -pNorm;
+          } else {
+            pScaled = pNorm * 2 - 1;
+          }
+          wLok += w * pScaled;
+        }
+      } else {
+        let dir = 0;
+        const s = dirStr.toLowerCase();
+        if (dirStr === 'isUp' || s.includes('up')) dir = 1;
+        else if (dirStr === 'isDown' || s.includes('down')) dir = -1;
+        if (dir !== 0) {
+          const lower = lowers[i], upper = uppers[i], d = upper - lower;
+          let p = 0;
+          if (d > 0) {
+            p = (price - lower) / d;
+            p = Math.max(0, Math.min(1, p));
+          }
+          wLok += w * dir * p;
+        }
+      }
+    }
+    // global (indices 3..5)
+    for (let j = 0; j < globW.length; j++) {
+      const w = globW[j];
+      const idx = j + 3;
+      const dirStr = dirs[idx] || '';
+      if (dirStr.startsWith('isInner')) {
+        const lower = lowers[idx], upper = uppers[idx], d = upper - lower;
+        if (d > 0) {
+          let pNorm = (price - lower) / d;
+          pNorm = Math.max(0, Math.min(1, pNorm));
+          let pScaled = 0;
+          if (dirStr === 'isInnerUp') {
+            pScaled = pNorm;
+          } else if (dirStr === 'isInnerDown') {
+            pScaled = -pNorm;
+          } else {
+            pScaled = pNorm * 2 - 1;
+          }
+          wGlob += w * pScaled;
+        }
+      } else {
+        let dir = 0;
+        const s = dirStr.toLowerCase();
+        if (dirStr === 'isUp' || s.includes('up')) dir = 1;
+        else if (dirStr === 'isDown' || s.includes('down')) dir = -1;
+        if (dir !== 0) {
+          const lower = lowers[idx], upper = uppers[idx], d = upper - lower;
+          let p = 0;
+          if (d > 0) {
+            p = (price - lower) / d;
+            p = Math.max(0, Math.min(1, p));
+          }
+          wGlob += w * dir * p;
+        }
+      }
+    }
+    const local = sumLok > 0 ? wLok / sumLok : 0;
+    const global = sumGlob > 0 ? wGlob / sumGlob : 0;
+    return [Math.max(-1, Math.min(1, local)), Math.max(-1, Math.min(1, global))];
   }
 }

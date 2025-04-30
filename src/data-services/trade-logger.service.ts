@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const TRADE_LOG_PATH = path.resolve(__dirname, '../trades.json');
+const TRADE_LOG_PATH = path.resolve(__dirname, '../../data/trades.json');
 
 export interface TradeLogEntry {
   ticker: string;

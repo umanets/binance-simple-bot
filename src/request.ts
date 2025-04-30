@@ -36,4 +36,68 @@ export class TWAlertDto {
   @Type(() => Number)
   @IsNumber()
   reliability: number;
+
+  @IsString()
+  tfDir: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  tfUpperVal: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  tfLowerVal: number;
+  @IsString()
+  tf1Dir: string;
+  @Type(() => Number)
+  @IsNumber()
+  tf1UpperVal: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf1LowerVal: number;
+
+  @IsString()
+  tf2Dir: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf2UpperVal: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf2LowerVal: number;
+
+  @IsString()
+  tf3Dir: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf3UpperVal: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf3LowerVal: number;
+
+  @IsString()
+  tf4Dir: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf4UpperVal: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf4LowerVal: number;
+
+  @IsString()
+  tf5Dir: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  tf5UpperVal: number;
+  
+  @Type(() => Number)
+  @IsNumber()
+  tf5LowerVal: number;
 }

@@ -1,20 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
 import OpenAI from 'openai';
-import { SignalLogEntry } from './signal-logger.service';
-
-const PREDICTIONS_PATH = path.resolve(__dirname, '../predictions.json');
+import { SignalLogEntry } from './data-services/signal-logger.service';
+import { PredictionLoggerService } from './data-services/prediction-logger.service';
 
 @Injectable()
 export class PredictionService {
   private client: any;
 
-  constructor() {
+  constructor(private predictionLoggerService: PredictionLoggerService) {
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    if (!fs.existsSync(PREDICTIONS_PATH)) {
-      fs.writeFileSync(PREDICTIONS_PATH, '[]');
-    }
   }
 
   /**
@@ -128,12 +122,7 @@ Respond with exactly one JSON object:
     // Build record with a default executed flag
     const record = { timestamp: new Date().toISOString(), executed: false, ...result };
     // Persist prediction: replace any existing unexecuted entry for this ticker
-    const arr = JSON.parse(fs.readFileSync(PREDICTIONS_PATH, 'utf-8')) as any[];
-    const updated = arr.filter(
-      (r: any) => !(r.ticker === record.ticker && r.executed === false)
-    );
-    updated.push(record);
-    fs.writeFileSync(PREDICTIONS_PATH, JSON.stringify(updated, null, 2));
+    this.predictionLoggerService.persistPrediction(record);
     return record;
   }
 }

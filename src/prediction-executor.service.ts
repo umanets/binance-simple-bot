@@ -1,37 +1,14 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
 import Binance, { OrderType, TimeInForce } from 'binance-api-node';
-import { SignalLoggerService } from './signal-logger.service';
-
-const PREDICTIONS_PATH = path.resolve(__dirname, '../predictions.json');
-const ORDERS_LOG_PATH = path.resolve(__dirname, '../prediction-orders.json');
-
-interface PredictionRecord {
-  ticker: string;
-  entry: number;
-  stop_loss: number;
-  take_profit: number;
-  executed: boolean;
-  executedQty?: number;
-  entryExecutedPrice?: number;
-  timestamp: string;
-}
-
-interface OrderLog {
-  ticker: string;
-  /** Original signal timestamp (from SignalLogEntry.timestamp) */
-  signalTime: string;
-  buyPrice: number;
-  qty: number;
-  sellTime: string;
-  sellPrice: number;
-  profit: number;
-}
+import { SignalLoggerService } from './data-services/signal-logger.service';
+import { OnEvent } from '@nestjs/event-emitter';
+import { PredictionLoggerService } from './data-services/prediction-logger.service';
 
 @Injectable()
 export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy {
-  constructor(private readonly signalLogger: SignalLoggerService) {}
+  constructor(
+    private readonly signalLogger: SignalLoggerService, 
+    private readonly predictionLoggerService: PredictionLoggerService) {}
   private client = Binance({
     apiKey: process.env.BINANCE_API_KEY,
     apiSecret: process.env.BINANCE_API_SECRET,
@@ -39,64 +16,17 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
   private subscriptions: Record<string, () => void> = {};
   private symbolFilters: Record<string, { minNotional: number; stepSize: number }> = {};
   private predictions: PredictionRecord[] = [];
+  private inProgress: Record<string, boolean> = {};
 
-  private watcher?: fs.FSWatcher;
   async onModuleInit() {
-    // Ensure orders log exists
-    if (!fs.existsSync(ORDERS_LOG_PATH)) {
-      fs.writeFileSync(ORDERS_LOG_PATH, '[]');
-    }
-    // Ensure predictions file exists before watching
-    if (!fs.existsSync(PREDICTIONS_PATH)) {
-      fs.writeFileSync(PREDICTIONS_PATH, '[]');
-    }
     // Initial load and subscription
     this.handlePredictionsFileChange();
-    // Watch for changes in predictions.json to subscribe/unsubscribe dynamically
-    try {
-      this.watcher = fs.watch(PREDICTIONS_PATH, (eventType) => {
-        if (eventType === 'change') {
-          this.handlePredictionsFileChange();
-        }
-      });
-    } catch (err) {
-      console.error('Failed to watch predictions.json:', err);
-    }
   }
 
   onModuleDestroy() {
-    // Unsubscribe all sockets
     for (const unsub of Object.values(this.subscriptions)) {
       unsub();
     }
-    // Stop file watcher
-    if (this.watcher) {
-      this.watcher.close();
-    }
-  }
-
-  private loadPredictions() {
-    try {
-      const data = fs.readFileSync(PREDICTIONS_PATH, 'utf-8');
-      this.predictions = JSON.parse(data) as PredictionRecord[];
-    } catch {
-      this.predictions = [];
-    }
-  }
-
-  private persistPredictions() {
-    fs.writeFileSync(
-      PREDICTIONS_PATH,
-      JSON.stringify(this.predictions, null, 2)
-    );
-  }
-
-  private persistOrderLog(log: OrderLog) {
-    const arr: OrderLog[] = JSON.parse(
-      fs.readFileSync(ORDERS_LOG_PATH, 'utf-8')
-    );
-    arr.push(log);
-    fs.writeFileSync(ORDERS_LOG_PATH, JSON.stringify(arr, null, 2));
   }
 
   private async subscribeTicker(ticker: string) {
@@ -126,14 +56,9 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
   /**
    * Handle changes in predictions.json: subscribe to new tickers and unsubscribe removed ones.
    */
+  @OnEvent('predictions.changed')
   private handlePredictionsFileChange(): void {
-    let newPreds: PredictionRecord[] = [];
-    try {
-      const data = fs.readFileSync(PREDICTIONS_PATH, 'utf-8');
-      newPreds = JSON.parse(data) as PredictionRecord[];
-    } catch {
-      newPreds = [];
-    }
+    const newPreds = this.predictionLoggerService.getPredictions()
     const newTickers = newPreds.map(r => r.ticker);
     // Subscribe to any new tickers
     for (const ticker of newTickers) {
@@ -154,90 +79,115 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
   }
 
   private async handlePrice(ticker: string, price: number) {
-    const recIndex = this.predictions.findIndex(r => r.ticker === ticker);
-    if (recIndex === -1) return;
-    const rec = this.predictions[recIndex];
-    // BUY trigger
-    if (!rec.executed && price <= rec.entry) {
-      const { minNotional, stepSize } = this.symbolFilters[ticker];
-      let qty = (minNotional / price) * 2;
-      if (stepSize > 0) {
-        qty = qty - (qty % stepSize);
-        if (qty < stepSize) qty = stepSize;
-      }
-      // Place market buy
-      const order = await this.client.order({
-        symbol: ticker,
-        side: 'BUY',
-        type: OrderType.MARKET,
-        quantity: qty.toFixed(8),
-      });
-      const boughtQty = parseFloat((order.executedQty as string) || qty.toString());
-      const cost = parseFloat((order.cummulativeQuoteQty as string) || '0');
-      const avgPrice = boughtQty > 0 ? cost / boughtQty : price;
-      // Update record
-      rec.executed = true;
-      rec.executedQty = boughtQty;
-      rec.entryExecutedPrice = avgPrice;
-      this.persistPredictions();
-      return;
-    }
-    // SELL trigger (TP or SL)
-    if (rec.executed) {
-      const tp = rec.take_profit;
-      const sl = rec.stop_loss;
-      let doSell = false;
-      let sellPrice = tp;
-      if (price >= tp) {
-        doSell = true;
-        sellPrice = tp;
-      } else if (price <= sl) {
-        doSell = true;
-        sellPrice = sl;
-      }
-      if (doSell && rec.executedQty && rec.entryExecutedPrice !== undefined) {
-        let qty = rec.executedQty;
-        const stepSize = this.symbolFilters[ticker].stepSize;
-        if (stepSize > 0) qty = qty - (qty % stepSize);
-        if (qty <= 0) return;
-        // Place limit sell
-        await this.client.order({
+    if (this.inProgress[ticker]) return;
+    this.inProgress[ticker] = true;
+    try {
+      const recIndex = this.predictions.findIndex(r => r.ticker === ticker);
+      if (recIndex === -1) return;
+      const rec = this.predictions[recIndex];
+      // BUY trigger
+      if (!rec.executed && price <= rec.entry) {
+        const { minNotional, stepSize } = this.symbolFilters[ticker];
+        let qty = (minNotional / price) * 2;
+        if (stepSize > 0) {
+          qty = qty - (qty % stepSize);
+          if (qty < stepSize) qty = stepSize;
+        }
+        // Place market buy
+        const order = await this.client.order({
           symbol: ticker,
-          side: 'SELL',
-          type: OrderType.LIMIT,
-          timeInForce: TimeInForce.GTC,
+          side: 'BUY',
+          type: OrderType.MARKET,
           quantity: qty.toFixed(8),
-          price: sellPrice.toFixed(8),
         });
-        // Log to orders file
-        const profit = (sellPrice - rec.entryExecutedPrice) * qty;
-        this.persistOrderLog({
-          ticker,
-          signalTime: rec.timestamp,
-          buyPrice: rec.entryExecutedPrice!,
-          qty,
-          sellTime: new Date().toISOString(),
-          sellPrice,
-          profit,
-        });
-        // Label the original signal with profit in signals_log_labeled.json
-        try {
-          await this.signalLogger.labelSignal(
-            rec.ticker,
-            rec.timestamp,
-            profit
-          );
-        } catch (err) {
-          console.error('Error labeling signal in SignalLoggerService:', err);
+        const boughtQty = parseFloat((order.executedQty as string) || qty.toString());
+        const cost = parseFloat((order.cummulativeQuoteQty as string) || '0');
+        const avgPrice = boughtQty > 0 ? cost / boughtQty : price;
+        // Update record
+        rec.executed = true;
+        rec.executedQty = boughtQty;
+        rec.entryExecutedPrice = avgPrice;
+        this.predictionLoggerService.persistPredictions(this.predictions);
+        return;
+      }
+      // SELL trigger (TP or SL)
+      if (rec.executed) {
+        const tp = rec.take_profit;
+        const sl = rec.stop_loss;
+        let doSell = false;
+        let sellPrice = tp;
+        if (price >= tp) {
+          doSell = true;
+          sellPrice = tp;
+        } else if (price <= sl) {
+          doSell = true;
+          sellPrice = sl;
         }
-        // Remove prediction and unsubscribe
-        this.predictions.splice(recIndex, 1);
-        this.persistPredictions();
-        const unsub = this.subscriptions[ticker];
-        if (unsub) {
-          unsub(); delete this.subscriptions[ticker];
+        if (doSell && rec.executedQty && rec.entryExecutedPrice !== undefined) {
+          let qty = rec.executedQty;
+          const stepSize = this.symbolFilters[ticker].stepSize;
+          if (stepSize > 0) qty = qty - (qty % stepSize);
+          if (qty <= 0) return;
+          // Place limit sell, handle insufficient balance error to avoid endless retries
+          try {
+            await this.client.order({
+              symbol: ticker,
+              side: 'SELL',
+              type: OrderType.LIMIT,
+              timeInForce: TimeInForce.GTC,
+              quantity: qty.toFixed(8),
+              price: sellPrice.toFixed(8),
+            });
+          } catch (err: any) {
+            // If no balance, remove prediction and unsubscribe to stop retries
+            if (err.code === -2010) {
+              console.warn(
+                `[PredictionExecutor] Insufficient balance for ${ticker}, removing pending sell and unsubscribing`
+              );
+              this.predictions.splice(recIndex, 1);
+              this.predictionLoggerService.persistPredictions(this.predictions);
+              const unsub = this.subscriptions[ticker];
+              if (unsub) {
+                unsub();
+                delete this.subscriptions[ticker];
+              }
+              return;
+            }
+            throw err;
+          }
+          // Log to orders file
+          const profit = (sellPrice - rec.entryExecutedPrice) * qty;
+          this.predictionLoggerService.persistOrderLog({
+            ticker,
+            signalTime: rec.timestamp,
+            buyPrice: rec.entryExecutedPrice!,
+            qty,
+            sellTime: new Date().toISOString(),
+            sellPrice,
+            profit,
+          });
+          // Label the original signal
+          try {
+            await this.signalLogger.labelSignal(
+              rec.ticker,
+              rec.timestamp,
+              profit
+            );
+          } catch (err) {
+            console.error('Error labeling signal in SignalLoggerService:', err);
+          }
+          // Remove prediction and unsubscribe
+          this.predictions.splice(recIndex, 1);
+          this.predictionLoggerService.persistPredictions(this.predictions);
+          const unsub = this.subscriptions[ticker];
+          if (unsub) {
+            unsub();
+            delete this.subscriptions[ticker];
+          }
         }
       }
+    } finally {
+      delete this.inProgress[ticker];
     }
   }
 }

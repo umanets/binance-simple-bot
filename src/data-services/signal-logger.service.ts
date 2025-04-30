@@ -32,9 +32,9 @@ export interface SignalLogEntry {
   }[];
 }
 
-const SIGNAL_LOG_PATH = path.resolve(__dirname, '../signals_log.json');
+const SIGNAL_LOG_PATH = path.resolve(__dirname, '../../data/signals_log.json');
 // File to hold labeled signals (original signal + profit)
-const LABELED_SIGNALS_PATH = path.resolve(__dirname, '../signals_log_labeled.json');
+const LABELED_SIGNALS_PATH = path.resolve(__dirname, '../../data/signals_log_labeled.json');
 
 @Injectable()
 export class SignalLoggerService {

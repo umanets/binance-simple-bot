@@ -7,8 +7,8 @@ export interface GhostTradeEntry {
   price: number;
 }
 
-const GHOST_BUY_PATH = path.resolve(__dirname, '../ghost_buy_trades.json');
-const GHOST_SELL_PATH = path.resolve(__dirname, '../ghost_sell_trades.json');
+const GHOST_BUY_PATH = path.resolve(__dirname, '../../data/ghost_buy_trades.json');
+const GHOST_SELL_PATH = path.resolve(__dirname, '../../data/ghost_sell_trades.json');
 
 @Injectable()
 export class GhostTradeService {
