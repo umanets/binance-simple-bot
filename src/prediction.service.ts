@@ -1,11 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { SignalLogEntry } from './data-services/signal-logger.service';
 import { PredictionLoggerService } from './data-services/prediction-logger.service';
 
+/** Shape the LLM is required to return (see buildPrompt). */
+interface LlmPrediction {
+  ticker: string;
+  time: string;
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+}
+
+/**
+ * How far a recommended level may deviate from the signal price before we
+ * treat the response as a hallucination (5x in either direction).
+ */
+const MAX_PRICE_DEVIATION = 5;
+
 @Injectable()
 export class PredictionService {
-  private client: any;
+  private client: OpenAI;
+  private readonly logger = new Logger(PredictionService.name);
 
   constructor(private predictionLoggerService: PredictionLoggerService) {
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -84,7 +100,53 @@ Respond with exactly one JSON object:
 }`;
   }
 
-  async predict(entry: SignalLogEntry): Promise<any> {
+  /**
+   * Parse and validate the LLM response before any money is moved on it.
+   * Rejects malformed JSON, wrong ticker, non-finite/non-positive levels,
+   * inverted stop/target and levels implausibly far from the signal price.
+   */
+  private parseLlmPrediction(text: string, signal: SignalLogEntry): LlmPrediction {
+    // Models occasionally wrap JSON in markdown code fences — strip them
+    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let raw: any;
+    try {
+      raw = JSON.parse(cleaned);
+    } catch {
+      throw new Error(`LLM response is not valid JSON: ${text.slice(0, 300)}`);
+    }
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new Error(`LLM response is not a JSON object: ${cleaned.slice(0, 300)}`);
+    }
+    if (raw.ticker !== signal.ticker) {
+      throw new Error(`LLM returned ticker "${raw.ticker}", expected "${signal.ticker}"`);
+    }
+    for (const field of ['entry', 'stop_loss', 'take_profit'] as const) {
+      const v = raw[field];
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+        throw new Error(`LLM field "${field}" is not a positive finite number: ${v}`);
+      }
+      // Guard against hallucinated magnitudes (wrong unit, lost decimal point)
+      if (v > signal.price * MAX_PRICE_DEVIATION || v < signal.price / MAX_PRICE_DEVIATION) {
+        throw new Error(
+          `LLM field "${field}"=${v} deviates more than ${MAX_PRICE_DEVIATION}x from signal price ${signal.price}`
+        );
+      }
+    }
+    if (raw.stop_loss >= raw.take_profit) {
+      throw new Error(
+        `LLM stop_loss (${raw.stop_loss}) must be below take_profit (${raw.take_profit}) for a long position`
+      );
+    }
+    return {
+      ticker: raw.ticker,
+      time: typeof raw.time === 'string' ? raw.time : new Date().toISOString(),
+      entry: raw.entry,
+      stop_loss: raw.stop_loss,
+      take_profit: raw.take_profit,
+    };
+  }
+
+  async predict(entry: SignalLogEntry): Promise<PredictionRecord | undefined> {
     // Only perform predictions for buy signals
     if (entry.direction !== 'aBuy') {
       return undefined;
@@ -100,27 +162,27 @@ Respond with exactly one JSON object:
       max_tokens: 200,
     });
     const text = resp.choices?.[0]?.message?.content?.trim() || '';
-    let result: any;
-    try {
-      result = JSON.parse(text);
-    } catch (err) {
-      throw new Error('Failed to parse LLM response as JSON: ' + text);
-    }
-    // Post-process LLM output: use its stop_loss as the new entry,
-    // and enforce stop_loss to be the lowest zigzag low
-    const originalSL = result.stop_loss;
-    // override entry to the LLM-provided stop_loss
-    result.entry = originalSL;
-    // compute zigzag pivots from raw candles, if available
+    const result = this.parseLlmPrediction(text, entry);
+    // Strategy quirk (intentional): enter deeper, at the LLM's stop-loss level,
+    // and move the stop further down to the lowest recent zigzag low.
+    const entryLevel = result.stop_loss;
+    let stopLoss = result.stop_loss;
     const pivots = Array.isArray(entry.candles)
       ? this.extractZigZag(entry.candles)
       : [];
     const lowPivots = pivots.filter(p => p.type === 'low').map(p => p.price);
     if (lowPivots.length > 0) {
-      result.stop_loss = Math.min(...lowPivots);
+      stopLoss = Math.min(...lowPivots);
     }
     // Build record with a default executed flag
-    const record = { timestamp: new Date().toISOString(), executed: false, ...result };
+    const record: PredictionRecord = {
+      timestamp: new Date().toISOString(),
+      executed: false,
+      ticker: result.ticker,
+      entry: entryLevel,
+      stop_loss: stopLoss,
+      take_profit: result.take_profit,
+    };
     // Persist prediction: replace any existing unexecuted entry for this ticker
     this.predictionLoggerService.persistPrediction(record);
     return record;
