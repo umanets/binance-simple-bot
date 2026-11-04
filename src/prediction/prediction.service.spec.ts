@@ -88,6 +88,8 @@ describe('PredictionService.predict', () => {
       stop_loss: 80, // lowest zigzag low
       take_profit: 110,
       executed: false,
+      // Must carry the signal's own timestamp or labeling can never match
+      timestamp: '2026-01-01T00:00:00.000Z',
     });
     expect(predictionLogger.persistPrediction).toHaveBeenCalledWith(record);
   });

@@ -90,7 +90,9 @@ Respond with exactly one JSON object:
       stopLoss = Math.min(...lowPivots);
     }
     const record: PredictionRecord = {
-      timestamp: new Date().toISOString(),
+      // Carry the originating signal's timestamp so the executor can label
+      // the exact signals_log.json row when the trade completes
+      timestamp: entry.timestamp,
       executed: false,
       ticker: result.ticker,
       entry: entryLevel,

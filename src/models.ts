@@ -6,6 +6,10 @@ export interface PredictionRecord {
   executed: boolean;
   executedQty?: number;
   entryExecutedPrice?: number;
+  /**
+   * Timestamp of the originating signal (SignalLogEntry.timestamp) — used to
+   * label the exact signal row once the prediction trade completes.
+   */
   timestamp: string;
 }
 
