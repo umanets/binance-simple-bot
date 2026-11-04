@@ -98,38 +98,18 @@ function bandScore(band: TimeframeBand, price: number): number {
   return bandDirection(band.dir) * bandProximity(band, price);
 }
 
+function band(dir?: string, upper?: number, lower?: number): TimeframeBand {
+  return { dir: dir ?? '', upper: upper ?? 0, lower: lower ?? 0 };
+}
+
 function timeframeBands(request: TWAlertDto): TimeframeBand[] {
   return [
-    {
-      dir: request.tfDir ?? '',
-      upper: request.tfUpperVal ?? 0,
-      lower: request.tfLowerVal ?? 0,
-    },
-    {
-      dir: request.tf1Dir ?? '',
-      upper: request.tf1UpperVal ?? 0,
-      lower: request.tf1LowerVal ?? 0,
-    },
-    {
-      dir: request.tf2Dir ?? '',
-      upper: request.tf2UpperVal ?? 0,
-      lower: request.tf2LowerVal ?? 0,
-    },
-    {
-      dir: request.tf3Dir ?? '',
-      upper: request.tf3UpperVal ?? 0,
-      lower: request.tf3LowerVal ?? 0,
-    },
-    {
-      dir: request.tf4Dir ?? '',
-      upper: request.tf4UpperVal ?? 0,
-      lower: request.tf4LowerVal ?? 0,
-    },
-    {
-      dir: request.tf5Dir ?? '',
-      upper: request.tf5UpperVal ?? 0,
-      lower: request.tf5LowerVal ?? 0,
-    },
+    band(request.tfDir, request.tfUpperVal, request.tfLowerVal),
+    band(request.tf1Dir, request.tf1UpperVal, request.tf1LowerVal),
+    band(request.tf2Dir, request.tf2UpperVal, request.tf2LowerVal),
+    band(request.tf3Dir, request.tf3UpperVal, request.tf3LowerVal),
+    band(request.tf4Dir, request.tf4UpperVal, request.tf4LowerVal),
+    band(request.tf5Dir, request.tf5UpperVal, request.tf5LowerVal),
   ];
 }
 
