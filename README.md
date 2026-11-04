@@ -1,9 +1,10 @@
 # Binance Simple Signal Executor Bot
 
 > **Status / disclaimer:** this is a demo-grade executor, not production trading software.
-> Quantity/PnL math uses plain floating point (no decimal library), errors from the
-> exchange are logged rather than halting the service, and LLM-assisted signals are not
-> schema-validated. Use it as a reference implementation; harden before trading real funds.
+> Money math uses decimal.js with exact lot/tick quantization and LLM predictions are
+> schema- and bounds-validated before any order is placed, but the trading logic has no
+> automated test coverage and exchange errors are logged rather than halting the service.
+> Use it as a reference implementation; harden and test before trading real funds.
 
 ## Description
 
