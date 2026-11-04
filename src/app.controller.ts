@@ -33,7 +33,24 @@ export class AppController {
         const result = await this.appService.buyLot(request);
         return { status: 'ok', data: result };
       }
+      if (request.direction === 'fBuy') {
+        const result = await this.appService.futuresBuyLot(request, 0.01);
+        return { status: 'ok', data: result };
+      }
+      if (request.direction === 'fSell') {
+        const result = await this.appService.futuresSellLot(request, 0.01);
+        return { status: 'ok', data: result };
+      }
+      // if (request.direction === 'dBuy') {
+      //   const result = await this.appService.futuresBuyLot(request, 0.002);
+      //   return { status: 'ok', data: result };
+      // }
+      // if (request.direction === 'dSell') {
+      //   const result = await this.appService.futuresSellLot(request, 0.002);
+      //   return { status: 'ok', data: result };
+      // }
     } catch (e: unknown) {
+      console.log(e);
       if (e instanceof Error) {
         return { status: 'error', error: e.message };
       }

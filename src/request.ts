@@ -1,17 +1,23 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Type } from 'class-transformer';
-import { IsString, IsIn, IsNumber } from 'class-validator';
+import { IsString, IsIn, IsNumber, IsOptional } from 'class-validator';
 
 export class TWAlertDto {
   @IsString()
   ticker: string;
 
-  @IsIn(['aBuy', 'aSell'])
-  direction: 'aBuy' | 'aSell';
+  @IsIn(['aBuy', 'aSell', 'fBuy', 'fSell', 'dBuy', 'dSell'])
+  direction: 'aBuy' | 'aSell' | 'fBuy' | 'fSell' | 'dBuy' | 'dSell';
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   price: number;
+  
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  sl: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -21,83 +27,105 @@ export class TWAlertDto {
   @IsNumber()
   sellCoef: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  atr: number;
+  atr?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  stdev: number;
+  stdev?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  volRatio: number;
+  volRatio?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  reliability: number;
+  reliability?: number;
 
+  @IsOptional()
   @IsString()
-  tfDir: string;
+  tfDir?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tfUpperVal: number;
+  tfUpperVal?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tfLowerVal: number;
+  tfLowerVal?: number;
+  @IsOptional()
   @IsString()
-  tf1Dir: string;
+  tf1Dir?: string;
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf1UpperVal: number;
+  tf1UpperVal?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf1LowerVal: number;
+  tf1LowerVal?: number;
 
+  @IsOptional()
   @IsString()
-  tf2Dir: string;
+  tf2Dir?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf2UpperVal: number;
+  tf2UpperVal?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf2LowerVal: number;
+  tf2LowerVal?: number;
 
+  @IsOptional()
   @IsString()
-  tf3Dir: string;
+  tf3Dir?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf3UpperVal: number;
+  tf3UpperVal?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf3LowerVal: number;
+  tf3LowerVal?: number;
 
+  @IsOptional()
   @IsString()
-  tf4Dir: string;
+  tf4Dir?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf4UpperVal: number;
+  tf4UpperVal?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf4LowerVal: number;
+  tf4LowerVal?: number;
 
+  @IsOptional()
   @IsString()
-  tf5Dir: string;
+  tf5Dir?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf5UpperVal: number;
+  tf5UpperVal?: number;
   
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  tf5LowerVal: number;
+  tf5LowerVal?: number;
 }

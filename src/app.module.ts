@@ -18,7 +18,7 @@ import { PredictionLoggerService } from './data-services/prediction-logger.servi
     SignalLoggerService,
     PredictionService,
     PredictionLoggerService,
-    PredictionExecutorService,
+    // PredictionExecutorService,
   ],
 })
 export class AppModule {}

@@ -50,6 +50,16 @@ async function step(ticker: string) {
   return Number.parseFloat(stepSize);
 }
 
+async function fstep(ticker: string) {
+  const tickerInfo = await client.futuresExchangeInfo();
+  const symbolInfo = tickerInfo.symbols.find((x) => x.symbol === ticker);
+  const lotSizeFilter = symbolInfo?.filters.find(
+    (f) => f.filterType === SymbolFilterType.LOT_SIZE,
+  ) as { stepSize?: string } | undefined;
+  const stepSize: string | undefined = lotSizeFilter?.stepSize ?? '0.0001';
+  return Number.parseFloat(stepSize);
+}
+
 async function base_currency_balance(ticker: string) {
   const asset = ticker.substring(0, ticker.length - QUOTE_CURRENCY.length);
   const prices = await client.prices();
@@ -87,6 +97,34 @@ async function freeBalanceUSDT(): Promise<number> {
   const usdt = account.balances.find((b) => b.asset === QUOTE_CURRENCY);
   return usdt ? parseFloat(usdt.free) : 0;
 }
+/**
+ * Get USDT futures wallet balance (available in futures account).
+ */
+async function futuresBalanceUSDT(): Promise<number> {
+  // futuresBalance returns list of assets in futures wallet
+  // Use futuresAccountBalance to fetch USDT futures wallet balances
+  const balances = await client.futuresAccountBalance();
+  const usdt = balances.find(b => b.asset === QUOTE_CURRENCY);
+  return usdt ? parseFloat(usdt.balance) : 0;
+}
+/**
+ * Get the price tick size (minimum price increment) for the given symbol.
+ */
+async function priceStep(ticker: string): Promise<number> {
+  const info = await client.exchangeInfo({ symbol: ticker });
+  const sym = info.symbols.find(x => x.symbol === ticker);
+  const pf = sym?.filters.find(f => f.filterType === SymbolFilterType.PRICE_FILTER) as { tickSize?: string };
+  const tick = pf?.tickSize ?? '0.01';
+  return parseFloat(tick);
+}
+
+async function fpriceStep(ticker: string): Promise<number> {
+  const info = await client.futuresExchangeInfo();
+  const sym = info.symbols.find(x => x.symbol === ticker);
+  const pf = sym?.filters.find(f => f.filterType === SymbolFilterType.PRICE_FILTER) as { tickSize?: string };
+  const tick = pf?.tickSize ?? '0.01';
+  return parseFloat(tick);
+}
 
 // Fetch recent candlestick data
 async function getCandles(
@@ -104,14 +142,56 @@ async function getCandles(
     volume: parseFloat(c.volume),
   }));
 }
+/**
+ * Place a USDT-M futures order.
+ * @param options Futures order payload (symbol, side, type, etc.)
+ */
+async function futuresOrder(options: any): Promise<any> {
+  console.log('exectute order')
+  console.log(options)
+  return client.futuresOrder(options);
+}
+/**
+ * Cancel a USDT-M futures order.
+ * @param options options containing symbol and orderId or origClientOrderId
+ */
+async function futuresCancelOrder(options: any): Promise<any> {
+  return client.futuresCancelOrder(options);
+}
+/**
+ * Fetch current futures position risks, including entry price and position amount.
+ */
+async function futuresPositionRisk(): Promise<any> {
+  return client.futuresPositionRisk();
+}
+/**
+ * Fetch USDT-M futures account info (e.g., margin ratio).
+ */
+async function futuresAccountInfo(): Promise<any> {
+  return client.futuresAccountInfo();
+}
+
+async function marginRatio():Promise<number> {
+  const a = await futuresAccountInfo();
+  return parseFloat(a.totalInitialMargin) / parseFloat(a.totalMarginBalance);
+}
 
 export {
   get_price,
   buy,
   sell,
   step,
+  fstep,
   base_currency_balance,
   totalBalanceUSDT,
   freeBalanceUSDT,
+  futuresBalanceUSDT,
+  priceStep,
   getCandles,
+  futuresOrder,
+  futuresCancelOrder,
+  futuresPositionRisk,
+  fpriceStep,
+  // futuresAccountInfo,
+  marginRatio
 };

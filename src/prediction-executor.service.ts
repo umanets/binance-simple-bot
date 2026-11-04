@@ -28,13 +28,13 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
 
   async onModuleInit() {
     // Initial load and subscription
-    this.handlePredictionsFileChange();
+    // this.handlePredictionsFileChange();
   }
 
   onModuleDestroy() {
-    for (const unsub of Object.values(this.subscriptions)) {
-      unsub();
-    }
+    // for (const unsub of Object.values(this.subscriptions)) {
+    //   unsub();
+    // }
   }
 
   private async subscribeTicker(ticker: string) {
