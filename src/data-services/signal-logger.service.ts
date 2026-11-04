@@ -18,8 +18,11 @@ export interface SignalLogEntry {
   ghostPairsCount: number;
   tradeCount: number;
   initialFib: number;
+  /** Ghost pairs beyond trade count: max(0, ghostPairsCount - tradeCount). */
   a: number;
+  /** Dynamic shrink coefficient computed from the alert metrics. */
   k: number;
+  /** Fibonacci threshold shrunk by ghost pressure: initialFib / (1 + k * a). */
   fibN: number;
   nextStepCoef: number;
   candles?: {

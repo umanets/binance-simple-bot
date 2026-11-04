@@ -98,7 +98,7 @@ Respond with exactly one JSON object:
       take_profit: result.take_profit,
     };
     // Persist prediction: replace any existing unexecuted entry for this ticker
-    this.predictionLoggerService.persistPrediction(record);
+    await this.predictionLoggerService.persistPrediction(record);
     return record;
   }
 }

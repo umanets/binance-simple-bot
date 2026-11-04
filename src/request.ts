@@ -2,6 +2,11 @@ import { Type } from 'class-transformer';
 import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class TWAlertDto {
+  /** Shared secret matched against the ALERT_TOKEN env var when that is set. */
+  @IsOptional()
+  @IsString()
+  token?: string;
+
   @IsString()
   ticker: string;
 

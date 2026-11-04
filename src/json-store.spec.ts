@@ -1,12 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import {
-  readJsonArray,
-  readJsonArraySync,
-  writeJsonArray,
-  ensureJsonFile,
-} from './json-store';
+import { readJsonArray, writeJsonArray, ensureJsonFile } from './json-store';
 
 describe('json-store', () => {
   let dir: string;
@@ -22,14 +17,12 @@ describe('json-store', () => {
   it('treats a missing file as an empty array', async () => {
     const missing = path.join(dir, 'missing.json');
     await expect(readJsonArray(missing)).resolves.toEqual([]);
-    expect(readJsonArraySync(missing)).toEqual([]);
   });
 
   it('throws on corrupt JSON instead of silently dropping data', async () => {
     const corrupt = path.join(dir, 'corrupt.json');
     fs.writeFileSync(corrupt, '[{"broken":');
     await expect(readJsonArray(corrupt)).rejects.toThrow();
-    expect(() => readJsonArraySync(corrupt)).toThrow();
   });
 
   it('round-trips an array', async () => {
@@ -46,5 +39,11 @@ describe('json-store', () => {
     fs.writeFileSync(file, '[1]');
     ensureJsonFile(file);
     expect(fs.readFileSync(file, 'utf-8')).toBe('[1]');
+  });
+
+  it('ensureJsonFile creates missing parent directories', () => {
+    const nested = path.join(dir, 'deep', 'nested', 'data.json');
+    ensureJsonFile(nested);
+    expect(fs.readFileSync(nested, 'utf-8')).toBe('[]');
   });
 });

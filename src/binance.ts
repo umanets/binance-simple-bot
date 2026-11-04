@@ -33,7 +33,8 @@ export async function getPrice(ticker: string): Promise<number> {
   return currentPrice;
 }
 
-export async function sell(
+/** Sell at a fixed price with a LIMIT order (good-till-cancelled). */
+export async function limitSell(
   ticker: string,
   qty: number,
   limitPrice: number,
@@ -49,7 +50,8 @@ export async function sell(
   return client.order(payload as NewOrderSpot);
 }
 
-export async function buy(ticker: string, qty: number): Promise<Order> {
+/** Buy immediately at market price with a MARKET order. */
+export async function marketBuy(ticker: string, qty: number): Promise<Order> {
   const payload = {
     symbol: ticker,
     side: 'BUY',
@@ -59,24 +61,72 @@ export async function buy(ticker: string, qty: number): Promise<Order> {
   return client.order(payload as NewOrderSpot);
 }
 
+/** Numeric value of the named key on the first filter matching one of the types. */
+function filterNumber(
+  filters: { filterType: string }[],
+  types: string[],
+  key: string,
+  fallback = 0,
+): number {
+  const filter = filters.find((f) => types.includes(f.filterType)) as
+    | Record<string, string>
+    | undefined;
+  const raw = filter?.[key];
+  return raw ? Number.parseFloat(raw) : fallback;
+}
+
+export interface SpotSymbolFilters {
+  minNotional: number;
+  stepSize: number;
+  tickSize: number;
+}
+
+/** Spot trading filters (min notional, lot step, price tick) for a symbol. */
+export async function spotSymbolFilters(
+  ticker: string,
+): Promise<SpotSymbolFilters | undefined> {
+  const info = await client.exchangeInfo({ symbol: ticker });
+  const sym = info.symbols.find((x) => x.symbol === ticker);
+  if (!sym) return undefined;
+  const filters = sym.filters as { filterType: string }[];
+  return {
+    // Support both legacy MIN_NOTIONAL and newer NOTIONAL filter types
+    minNotional: filterNumber(
+      filters,
+      [SymbolFilterType.MIN_NOTIONAL, 'NOTIONAL'],
+      'minNotional',
+    ),
+    stepSize: filterNumber(filters, [SymbolFilterType.LOT_SIZE], 'stepSize'),
+    tickSize: filterNumber(
+      filters,
+      [SymbolFilterType.PRICE_FILTER],
+      'tickSize',
+    ),
+  };
+}
+
 /** Spot LOT_SIZE step for the symbol (minimum quantity increment). */
 export async function lotStep(ticker: string): Promise<number> {
-  const tickerInfo = await client.exchangeInfo({ symbol: ticker });
-  const symbolInfo = tickerInfo.symbols.find((x) => x.symbol === ticker);
-  const lotSizeFilter = symbolInfo?.filters.find(
-    (f) => f.filterType === SymbolFilterType.LOT_SIZE,
-  ) as { stepSize?: string } | undefined;
-  return Number.parseFloat(lotSizeFilter?.stepSize ?? '0.0001');
+  const info = await client.exchangeInfo({ symbol: ticker });
+  const sym = info.symbols.find((x) => x.symbol === ticker);
+  return filterNumber(
+    (sym?.filters ?? []) as { filterType: string }[],
+    [SymbolFilterType.LOT_SIZE],
+    'stepSize',
+    0.0001,
+  );
 }
 
 /** Futures LOT_SIZE step for the symbol (minimum quantity increment). */
 export async function futuresLotStep(ticker: string): Promise<number> {
-  const tickerInfo = await client.futuresExchangeInfo();
-  const symbolInfo = tickerInfo.symbols.find((x) => x.symbol === ticker);
-  const lotSizeFilter = symbolInfo?.filters.find(
-    (f) => f.filterType === SymbolFilterType.LOT_SIZE,
-  ) as { stepSize?: string } | undefined;
-  return Number.parseFloat(lotSizeFilter?.stepSize ?? '0.0001');
+  const info = await client.futuresExchangeInfo();
+  const sym = info.symbols.find((x) => x.symbol === ticker);
+  return filterNumber(
+    (sym?.filters ?? []) as { filterType: string }[],
+    [SymbolFilterType.LOT_SIZE],
+    'stepSize',
+    0.0001,
+  );
 }
 
 export async function baseCurrencyBalance(ticker: string): Promise<number> {

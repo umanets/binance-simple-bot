@@ -1,4 +1,10 @@
-import { Body, Controller, Logger, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Logger,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { SpotTradeService } from './spot-trade.service';
 import { FuturesTradeService } from './futures-trade.service';
 import { TWAlertDto } from './request';
@@ -14,7 +20,15 @@ export class AppController {
 
   @Post('alert')
   async processAlert(@Body() request: TWAlertDto) {
-    this.logger.log(`Alert received: ${JSON.stringify(request)}`);
+    // Opt-in shared-secret check: enforced only when ALERT_TOKEN is configured
+    const expectedToken = process.env.ALERT_TOKEN;
+    if (expectedToken && request.token !== expectedToken) {
+      this.logger.warn('Alert rejected: missing or invalid token');
+      throw new UnauthorizedException();
+    }
+    // Keep the shared secret out of the logs
+    const payload = { ...request, token: undefined };
+    this.logger.log(`Alert received: ${JSON.stringify(payload)}`);
     try {
       switch (request.direction) {
         case 'aBuy':

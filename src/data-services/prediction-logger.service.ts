@@ -8,11 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderLog, PredictionRecord } from '../models';
-import {
-  ensureJsonFile,
-  readJsonArraySync,
-  writeJsonArraySync,
-} from '../json-store';
+import { ensureJsonFile, readJsonArray, writeJsonArray } from '../json-store';
 
 const PREDICTIONS_PATH = path.resolve(__dirname, '../../data/predictions.json');
 const ORDERS_LOG_PATH = path.resolve(
@@ -51,26 +47,26 @@ export class PredictionLoggerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Store a prediction, replacing any unexecuted entry for the same ticker. */
-  persistPrediction(record: PredictionRecord) {
-    const existing = this.getPredictions();
+  async persistPrediction(record: PredictionRecord): Promise<void> {
+    const existing = await this.getPredictions();
     const updated = existing.filter(
       (r) => !(r.ticker === record.ticker && r.executed === false),
     );
     updated.push(record);
-    writeJsonArraySync(PREDICTIONS_PATH, updated);
+    await writeJsonArray(PREDICTIONS_PATH, updated);
   }
 
-  persistPredictions(predictions: PredictionRecord[]) {
-    writeJsonArraySync(PREDICTIONS_PATH, predictions);
+  async persistPredictions(predictions: PredictionRecord[]): Promise<void> {
+    await writeJsonArray(PREDICTIONS_PATH, predictions);
   }
 
-  getPredictions(): PredictionRecord[] {
-    return readJsonArraySync<PredictionRecord>(PREDICTIONS_PATH);
+  async getPredictions(): Promise<PredictionRecord[]> {
+    return readJsonArray<PredictionRecord>(PREDICTIONS_PATH);
   }
 
-  persistOrderLog(log: OrderLog) {
-    const orders = readJsonArraySync<OrderLog>(ORDERS_LOG_PATH);
+  async persistOrderLog(log: OrderLog): Promise<void> {
+    const orders = await readJsonArray<OrderLog>(ORDERS_LOG_PATH);
     orders.push(log);
-    writeJsonArraySync(ORDERS_LOG_PATH, orders);
+    await writeJsonArray(ORDERS_LOG_PATH, orders);
   }
 }

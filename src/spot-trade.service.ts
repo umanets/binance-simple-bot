@@ -120,7 +120,7 @@ export class SpotTradeService {
     }
 
     const qtyNormalized = await this.normalizeToStep(buyQty, request.ticker);
-    const order = await binance.buy(request.ticker, qtyNormalized);
+    const order = await binance.marketBuy(request.ticker, qtyNormalized);
     const qty = parseFloat(order.executedQty);
     const price = order.fills?.[0]?.price
       ? parseFloat(order.fills[0].price)
@@ -186,7 +186,11 @@ export class SpotTradeService {
     }
 
     const qtyNorm = await this.normalizeToStep(sellQty, request.ticker);
-    const order = await binance.sell(request.ticker, qtyNorm, currentPrice);
+    const order = await binance.limitSell(
+      request.ticker,
+      qtyNorm,
+      currentPrice,
+    );
     // Partial sell: remove only the consumed portions of the selected trades
     const soldQty = qtyNorm;
     let remainingToSell = soldQty;

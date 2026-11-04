@@ -1,12 +1,17 @@
 import * as fs from 'fs';
+import * as path from 'path';
 
 function isFileMissing(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === 'ENOENT';
 }
 
-/** Create the file with an empty JSON array when it does not exist yet. */
+/**
+ * Create the file with an empty JSON array when it does not exist yet,
+ * including its parent directory on a fresh checkout.
+ */
 export function ensureJsonFile(filePath: string): void {
   if (!fs.existsSync(filePath)) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, '[]');
   }
 }
@@ -31,20 +36,4 @@ export async function writeJsonArray<T>(
   items: T[],
 ): Promise<void> {
   await fs.promises.writeFile(filePath, JSON.stringify(items, null, 2));
-}
-
-/** Synchronous variant of readJsonArray with the same failure contract. */
-export function readJsonArraySync<T>(filePath: string): T[] {
-  let text: string;
-  try {
-    text = fs.readFileSync(filePath, 'utf-8');
-  } catch (err) {
-    if (isFileMissing(err)) return [];
-    throw err;
-  }
-  return JSON.parse(text) as T[];
-}
-
-export function writeJsonArraySync<T>(filePath: string, items: T[]): void {
-  fs.writeFileSync(filePath, JSON.stringify(items, null, 2));
 }

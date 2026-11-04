@@ -44,10 +44,18 @@ This is a minimal REST backend service built with NestJS designed to act as a si
     cd your-bot-repo
     npm install
     ```
-2. **Create a `.env` file with your Binance credentials:**
+2. **Create a `.env` file with your credentials:**
     ```
     BINANCE_API_KEY=yourKey
     BINANCE_API_SECRET=yourSecret
+    # Required for the LLM prediction layer
+    OPENAI_API_KEY=yourOpenAiKey
+    # Optional: shared secret required in alert payloads when set
+    ALERT_TOKEN=yourWebhookSecret
+    # Optional: enable live trading of LLM predictions (default off)
+    ENABLE_PREDICTION_EXECUTOR=false
+    # Optional: fallback futures deposit size in USDT when wallet balance is zero
+    SIZE_OF_DEPO=100
     ```
 3. **Start the server:**
     ```
@@ -105,7 +113,7 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 ## What this service is NOT
 - No signal generation or strategy logic—signals (directions + coefficients) must come from external sources (e.g. TradingView).
 - You must provide the signal source (e.g. a TradingView webhook, custom script, or other automation).
-- The webhook endpoint is unauthenticated — run it behind a firewall/tunnel you control and never expose it to the public internet.
+- The webhook endpoint has no authentication unless you set `ALERT_TOKEN` (then every payload must include a matching `token` field). Either way, run it behind a firewall/tunnel you control rather than exposing it to the public internet.
   
 ---
   
