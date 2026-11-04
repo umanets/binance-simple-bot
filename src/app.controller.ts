@@ -1,60 +1,46 @@
-import {
-  Body,
-  Controller,
-  Post,
-  UsePipes,
-  ValidationPipe,
-} from '@nestjs/common';
-import { AppService } from './app.service';
+import { Body, Controller, Logger, Post } from '@nestjs/common';
+import { SpotTradeService } from './spot-trade.service';
+import { FuturesTradeService } from './futures-trade.service';
 import { TWAlertDto } from './request';
 
 @Controller('api')
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  private readonly logger = new Logger(AppController.name);
+
+  constructor(
+    private readonly spotTrades: SpotTradeService,
+    private readonly futuresTrades: FuturesTradeService,
+  ) {}
 
   @Post('alert')
-  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async processAlert(@Body() request: TWAlertDto) {
-    // Log full incoming payload
-    const timestamp = new Date().toLocaleTimeString();
-    console.log(
-      `Request @ ${timestamp} — payload: ${JSON.stringify(request)}`
-    );
-    // Calculate and log dynamic shrink coefficient k
-    const k = this.appService.calcK(request);
-    console.log(`Calculated shrink coefficient k: ${k.toFixed(4)}`);
+    this.logger.log(`Alert received: ${JSON.stringify(request)}`);
     try {
-      if (request.direction === 'aSell') {
-        const result = await this.appService.sellLot(request);
-        return { status: 'ok', data: result };
+      switch (request.direction) {
+        case 'aBuy':
+          return { status: 'ok', data: await this.spotTrades.buyLot(request) };
+        case 'aSell':
+          return { status: 'ok', data: await this.spotTrades.sellLot(request) };
+        case 'fBuy':
+          return {
+            status: 'ok',
+            data: await this.futuresTrades.openLong(request),
+          };
+        case 'fSell':
+          return {
+            status: 'ok',
+            data: await this.futuresTrades.openShort(request),
+          };
       }
-
-      if (request.direction === 'aBuy') {
-        const result = await this.appService.buyLot(request);
-        return { status: 'ok', data: result };
-      }
-      if (request.direction === 'fBuy') {
-        const result = await this.appService.futuresBuyLot(request, 0.01);
-        return { status: 'ok', data: result };
-      }
-      if (request.direction === 'fSell') {
-        const result = await this.appService.futuresSellLot(request, 0.01);
-        return { status: 'ok', data: result };
-      }
-      // if (request.direction === 'dBuy') {
-      //   const result = await this.appService.futuresBuyLot(request, 0.002);
-      //   return { status: 'ok', data: result };
-      // }
-      // if (request.direction === 'dSell') {
-      //   const result = await this.appService.futuresSellLot(request, 0.002);
-      //   return { status: 'ok', data: result };
-      // }
     } catch (e: unknown) {
-      console.log(e);
-      if (e instanceof Error) {
-        return { status: 'error', error: e.message };
-      }
-      return { status: 'error', error: String(e) };
+      this.logger.error(
+        'Alert processing failed',
+        e instanceof Error ? e.stack : String(e),
+      );
+      return {
+        status: 'error',
+        error: e instanceof Error ? e.message : String(e),
+      };
     }
   }
 }

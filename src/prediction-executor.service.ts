@@ -1,9 +1,16 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import Binance, { OrderType, TimeInForce } from 'binance-api-node';
-import { SignalLoggerService } from './data-services/signal-logger.service';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import { OrderType, TimeInForce } from 'binance-api-node';
 import { OnEvent } from '@nestjs/event-emitter';
+import { SignalLoggerService } from './data-services/signal-logger.service';
 import { PredictionLoggerService } from './data-services/prediction-logger.service';
+import { PredictionRecord } from './models';
 import { D, floorToStep } from './money';
+import { client } from './binance';
 
 interface SymbolFilters {
   minNotional: number;
@@ -11,105 +18,156 @@ interface SymbolFilters {
   tickSize: number;
 }
 
+function errorDetail(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
+}
+
+/** Numeric value of the named key on the first filter matching one of the types. */
+function filterValue(
+  filters: { filterType: string }[],
+  types: string[],
+  key: string,
+): number {
+  const filter = filters.find((f) => types.includes(f.filterType)) as
+    | Record<string, string>
+    | undefined;
+  const raw = filter?.[key];
+  return raw ? parseFloat(raw) : 0;
+}
+
+/**
+ * Watches predictions.json and trades LLM predictions live over Binance
+ * WebSocket price streams.
+ *
+ * Disabled by default: live trading only starts when the
+ * ENABLE_PREDICTION_EXECUTOR environment variable is set to 'true'.
+ */
 @Injectable()
-export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy {
+export class PredictionExecutorService
+  implements OnModuleInit, OnModuleDestroy
+{
   constructor(
     private readonly signalLogger: SignalLoggerService,
-    private readonly predictionLoggerService: PredictionLoggerService) {}
+    private readonly predictionLoggerService: PredictionLoggerService,
+  ) {}
   private readonly logger = new Logger(PredictionExecutorService.name);
-  private client = Binance({
-    apiKey: process.env.BINANCE_API_KEY,
-    apiSecret: process.env.BINANCE_API_SECRET,
-  });
+  private readonly enabled = process.env.ENABLE_PREDICTION_EXECUTOR === 'true';
   private subscriptions: Record<string, () => void> = {};
   private symbolFilters: Record<string, SymbolFilters> = {};
   private predictions: PredictionRecord[] = [];
   private inProgress: Record<string, boolean> = {};
 
-  async onModuleInit() {
-    // Initial load and subscription
-    // this.handlePredictionsFileChange();
+  onModuleInit() {
+    if (!this.enabled) {
+      this.logger.log(
+        'Prediction executor disabled (set ENABLE_PREDICTION_EXECUTOR=true to trade LLM predictions live)',
+      );
+      return;
+    }
+    this.handlePredictionsFileChange();
   }
 
   onModuleDestroy() {
-    // for (const unsub of Object.values(this.subscriptions)) {
-    //   unsub();
-    // }
+    for (const unsub of Object.values(this.subscriptions)) {
+      unsub();
+    }
+    this.subscriptions = {};
   }
 
   private async subscribeTicker(ticker: string) {
     if (this.subscriptions[ticker]) return;
     // Fetch symbol filters once
-    const info = await this.client.exchangeInfo();
-    const sym = info.symbols.find(s => s.symbol === ticker);
+    const info = await client.exchangeInfo();
+    const sym = info.symbols.find((s) => s.symbol === ticker);
     if (!sym) {
-      this.logger.warn(`Symbol ${ticker} not found in exchangeInfo; skipping subscription`);
+      this.logger.warn(
+        `Symbol ${ticker} not found in exchangeInfo; skipping subscription`,
+      );
       return;
     }
     // Support both legacy MIN_NOTIONAL and newer NOTIONAL filter types
-    const minNotionalF = sym.filters.find(
-      (f: any) => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL'
-    ) as any;
-    const lotSizeF = sym.filters.find(
-      (f: any) => f.filterType === 'LOT_SIZE'
-    ) as any;
-    const priceF = sym.filters.find(
-      (f: any) => f.filterType === 'PRICE_FILTER'
-    ) as any;
-    const minNotional = minNotionalF ? parseFloat(minNotionalF.minNotional) : 0;
-    const stepSize = lotSizeF ? parseFloat(lotSizeF.stepSize) : 0;
-    const tickSize = priceF ? parseFloat(priceF.tickSize) : 0;
-    this.symbolFilters[ticker] = { minNotional, stepSize, tickSize };
+    const filters = sym.filters as { filterType: string }[];
+    this.symbolFilters[ticker] = {
+      minNotional: filterValue(
+        filters,
+        ['MIN_NOTIONAL', 'NOTIONAL'],
+        'minNotional',
+      ),
+      stepSize: filterValue(filters, ['LOT_SIZE'], 'stepSize'),
+      tickSize: filterValue(filters, ['PRICE_FILTER'], 'tickSize'),
+    };
     // Subscribe to trade updates
-    const unsub = this.client.ws.trades(ticker, trade => {
-      const price = typeof trade.price === 'string' ? parseFloat(trade.price) : trade.price;
-      this.handlePrice(ticker, price).catch(err =>
-        this.logger.error(`Failed to handle price update for ${ticker} @ ${price}`, err?.stack ?? err)
+    const unsub = client.ws.trades(ticker, (trade) => {
+      const price =
+        typeof trade.price === 'string' ? parseFloat(trade.price) : trade.price;
+      this.handlePrice(ticker, price).catch((err: unknown) =>
+        this.logger.error(
+          `Failed to handle price update for ${ticker} @ ${price}`,
+          errorDetail(err),
+        ),
       );
     });
     this.subscriptions[ticker] = unsub;
   }
 
   /**
-   * Handle changes in predictions.json: subscribe to new tickers and unsubscribe removed ones.
+   * Handle changes in predictions.json: subscribe to new tickers and
+   * unsubscribe removed ones. Keeps the previous subscription set when the
+   * file is temporarily unreadable.
    */
   @OnEvent('predictions.changed')
   private handlePredictionsFileChange(): void {
-    const newPreds = this.predictionLoggerService.getPredictions()
-    const newTickers = newPreds.map(r => r.ticker);
+    if (!this.enabled) return;
+    let newPreds: PredictionRecord[];
+    try {
+      newPreds = this.predictionLoggerService.getPredictions();
+    } catch (err) {
+      this.logger.error(
+        'Failed to read predictions.json; keeping current subscriptions',
+        err instanceof Error ? err.stack : String(err),
+      );
+      return;
+    }
+    const newTickers = newPreds.map((r) => r.ticker);
     // Subscribe to any new tickers
     for (const ticker of newTickers) {
       if (!this.subscriptions[ticker]) {
-        this.subscribeTicker(ticker).catch(err =>
+        this.subscribeTicker(ticker).catch((err: unknown) =>
           this.logger.error(
             `Failed to subscribe to ${ticker}; will retry on the next predictions change`,
-            err?.stack ?? err
-          )
+            errorDetail(err),
+          ),
         );
       }
     }
     // Unsubscribe tickers no longer in predictions
     for (const ticker of Object.keys(this.subscriptions)) {
       if (!newTickers.includes(ticker)) {
-        const unsub = this.subscriptions[ticker];
-        if (unsub) unsub();
-        delete this.subscriptions[ticker];
+        this.unsubscribeTicker(ticker);
       }
     }
     // Update in-memory list
     this.predictions = newPreds;
   }
 
+  private unsubscribeTicker(ticker: string): void {
+    const unsub = this.subscriptions[ticker];
+    if (unsub) unsub();
+    delete this.subscriptions[ticker];
+  }
+
   private async handlePrice(ticker: string, price: number) {
     if (this.inProgress[ticker]) return;
     this.inProgress[ticker] = true;
     try {
-      const recIndex = this.predictions.findIndex(r => r.ticker === ticker);
+      const recIndex = this.predictions.findIndex((r) => r.ticker === ticker);
       if (recIndex === -1) return;
       const rec = this.predictions[recIndex];
       const filters = this.symbolFilters[ticker];
       if (!filters) {
-        this.logger.warn(`No exchange filters cached for ${ticker}; skipping price update`);
+        this.logger.warn(
+          `No exchange filters cached for ${ticker}; skipping price update`,
+        );
         return;
       }
       // BUY trigger
@@ -122,14 +180,14 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
           if (qty.lt(stepSize)) qty = D(stepSize);
         }
         // Place market buy
-        const order = await this.client.order({
+        const order = await client.order({
           symbol: ticker,
           side: 'BUY',
           type: OrderType.MARKET,
           quantity: qty.toFixed(),
         });
-        const boughtQty = D((order.executedQty as string) || qty.toFixed());
-        const cost = D((order.cummulativeQuoteQty as string) || '0');
+        const boughtQty = D(order.executedQty || qty.toFixed());
+        const cost = D(order.cummulativeQuoteQty || '0');
         const avgPrice = boughtQty.gt(0) ? cost.div(boughtQty) : D(price);
         // Update record
         rec.executed = true;
@@ -159,7 +217,7 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
           const limitPrice = floorToStep(D(sellPrice), tickSize);
           // Place limit sell, handle insufficient balance error to avoid endless retries
           try {
-            await this.client.order({
+            await client.order({
               symbol: ticker,
               side: 'SELL',
               type: OrderType.LIMIT,
@@ -167,19 +225,15 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
               quantity: qty.toFixed(),
               price: limitPrice.toFixed(),
             });
-          } catch (err: any) {
+          } catch (err: unknown) {
             // If no balance, remove prediction and unsubscribe to stop retries
-            if (err.code === -2010) {
+            if ((err as { code?: number }).code === -2010) {
               this.logger.warn(
-                `Insufficient balance for ${ticker}, removing pending sell and unsubscribing`
+                `Insufficient balance for ${ticker}, removing pending sell and unsubscribing`,
               );
               this.predictions.splice(recIndex, 1);
               this.predictionLoggerService.persistPredictions(this.predictions);
-              const unsub = this.subscriptions[ticker];
-              if (unsub) {
-                unsub();
-                delete this.subscriptions[ticker];
-              }
+              this.unsubscribeTicker(ticker);
               return;
             }
             throw err;
@@ -189,7 +243,7 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
           this.predictionLoggerService.persistOrderLog({
             ticker,
             signalTime: rec.timestamp,
-            buyPrice: rec.entryExecutedPrice!,
+            buyPrice: rec.entryExecutedPrice,
             qty: qty.toNumber(),
             sellTime: new Date().toISOString(),
             sellPrice: limitPrice.toNumber(),
@@ -200,22 +254,18 @@ export class PredictionExecutorService implements OnModuleInit, OnModuleDestroy 
             await this.signalLogger.labelSignal(
               rec.ticker,
               rec.timestamp,
-              profit.toNumber()
+              profit.toNumber(),
             );
-          } catch (err: any) {
+          } catch (err: unknown) {
             this.logger.error(
               `Failed to label signal for ${rec.ticker} @ ${rec.timestamp}`,
-              err?.stack ?? err
+              errorDetail(err),
             );
           }
           // Remove prediction and unsubscribe
           this.predictions.splice(recIndex, 1);
           this.predictionLoggerService.persistPredictions(this.predictions);
-          const unsub = this.subscriptions[ticker];
-          if (unsub) {
-            unsub();
-            delete this.subscriptions[ticker];
-          }
+          this.unsubscribeTicker(ticker);
         }
       }
     } finally {

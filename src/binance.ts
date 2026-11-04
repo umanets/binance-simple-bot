@@ -1,66 +1,85 @@
-import Binance, { NewOrderSpot, SymbolFilterType, CandleChartInterval } from 'binance-api-node';
-
-import * as dotenv from 'dotenv';
-dotenv.config();
+import Binance, {
+  CandleChartInterval,
+  FuturesOrder,
+  NewFuturesOrder,
+  NewOrderSpot,
+  Order,
+  PositionRiskResult,
+  SymbolFilterType,
+} from 'binance-api-node';
+import { Logger } from '@nestjs/common';
 
 const QUOTE_CURRENCY = 'USDT';
 
-const c = Binance();
-const client = Binance({
+const logger = new Logger('Binance');
+
+// Unauthenticated client used only as a time source so signed requests stay
+// aligned with the exchange clock.
+const timeSource = Binance();
+
+/** Shared authenticated client for every Binance consumer in the app. */
+export const client = Binance({
   apiKey: process.env.BINANCE_API_KEY,
   apiSecret: process.env.BINANCE_API_SECRET,
-  getTime: () => c.time(),
+  getTime: () => timeSource.time(),
 });
 
-async function get_price(ticker: string) {
+export async function getPrice(ticker: string): Promise<number> {
   const prices = await client.prices();
   const currentPrice = parseFloat(prices[ticker]);
+  if (!Number.isFinite(currentPrice)) {
+    throw new Error(`No price available for ${ticker}`);
+  }
   return currentPrice;
 }
 
-async function sell(ticker: string, qty: number, limit_price: number) {
+export async function sell(
+  ticker: string,
+  qty: number,
+  limitPrice: number,
+): Promise<Order> {
   const payload = {
     symbol: ticker,
     side: 'SELL',
     quantity: qty.toFixed(8),
-    price: limit_price.toFixed(8),
+    price: limitPrice.toFixed(8),
     type: 'LIMIT',
     timeInForce: 'GTC',
   };
-  return await client.order(payload as NewOrderSpot);
+  return client.order(payload as NewOrderSpot);
 }
 
-async function buy(ticker: string, qty: number) {
+export async function buy(ticker: string, qty: number): Promise<Order> {
   const payload = {
     symbol: ticker,
     side: 'BUY',
     quantity: qty.toFixed(8),
     type: 'MARKET',
   };
-  return await client.order(payload as NewOrderSpot);
+  return client.order(payload as NewOrderSpot);
 }
 
-async function step(ticker: string) {
+/** Spot LOT_SIZE step for the symbol (minimum quantity increment). */
+export async function lotStep(ticker: string): Promise<number> {
   const tickerInfo = await client.exchangeInfo({ symbol: ticker });
   const symbolInfo = tickerInfo.symbols.find((x) => x.symbol === ticker);
   const lotSizeFilter = symbolInfo?.filters.find(
     (f) => f.filterType === SymbolFilterType.LOT_SIZE,
   ) as { stepSize?: string } | undefined;
-  const stepSize: string | undefined = lotSizeFilter?.stepSize ?? '0.0001';
-  return Number.parseFloat(stepSize);
+  return Number.parseFloat(lotSizeFilter?.stepSize ?? '0.0001');
 }
 
-async function fstep(ticker: string) {
+/** Futures LOT_SIZE step for the symbol (minimum quantity increment). */
+export async function futuresLotStep(ticker: string): Promise<number> {
   const tickerInfo = await client.futuresExchangeInfo();
   const symbolInfo = tickerInfo.symbols.find((x) => x.symbol === ticker);
   const lotSizeFilter = symbolInfo?.filters.find(
     (f) => f.filterType === SymbolFilterType.LOT_SIZE,
   ) as { stepSize?: string } | undefined;
-  const stepSize: string | undefined = lotSizeFilter?.stepSize ?? '0.0001';
-  return Number.parseFloat(stepSize);
+  return Number.parseFloat(lotSizeFilter?.stepSize ?? '0.0001');
 }
 
-async function base_currency_balance(ticker: string) {
+export async function baseCurrencyBalance(ticker: string): Promise<number> {
   const asset = ticker.substring(0, ticker.length - QUOTE_CURRENCY.length);
   const prices = await client.prices();
   const balances = (await client.accountInfo()).balances.filter(
@@ -68,72 +87,59 @@ async function base_currency_balance(ticker: string) {
   );
   let result = 0;
   balances.forEach((x) => {
-    if (parseFloat(prices[x.asset + 'USDT'])) result += parseFloat(x.free);
+    if (parseFloat(prices[x.asset + QUOTE_CURRENCY])) {
+      result += parseFloat(x.free);
+    }
   });
   return result;
 }
 
-async function totalBalanceUSDT(): Promise<number> {
+export async function totalBalanceUSDT(): Promise<number> {
   const account = await client.accountInfo();
   const balances = account.balances.filter((b) => parseFloat(b.free) > 0);
   const prices = await client.prices();
   let total = 0;
   for (const b of balances) {
-    const asset = b.asset;
     const free = parseFloat(b.free);
-    if (asset === QUOTE_CURRENCY) {
+    if (b.asset === QUOTE_CURRENCY) {
       total += free;
     } else {
-      const pair = asset + QUOTE_CURRENCY;
-      const price = parseFloat(prices[pair] ?? '0');
+      const price = parseFloat(prices[b.asset + QUOTE_CURRENCY] ?? '0');
       if (price > 0) total += free * price;
     }
   }
   return total;
 }
 
-async function freeBalanceUSDT(): Promise<number> {
+export async function freeBalanceUSDT(): Promise<number> {
   const account = await client.accountInfo();
   const usdt = account.balances.find((b) => b.asset === QUOTE_CURRENCY);
   return usdt ? parseFloat(usdt.free) : 0;
 }
-/**
- * Get USDT futures wallet balance (available in futures account).
- */
-async function futuresBalanceUSDT(): Promise<number> {
-  // futuresBalance returns list of assets in futures wallet
-  // Use futuresAccountBalance to fetch USDT futures wallet balances
+
+/** USDT wallet balance available in the futures account. */
+export async function futuresBalanceUSDT(): Promise<number> {
   const balances = await client.futuresAccountBalance();
-  const usdt = balances.find(b => b.asset === QUOTE_CURRENCY);
+  const usdt = balances.find((b) => b.asset === QUOTE_CURRENCY);
   return usdt ? parseFloat(usdt.balance) : 0;
 }
-/**
- * Get the price tick size (minimum price increment) for the given symbol.
- */
-async function priceStep(ticker: string): Promise<number> {
-  const info = await client.exchangeInfo({ symbol: ticker });
-  const sym = info.symbols.find(x => x.symbol === ticker);
-  const pf = sym?.filters.find(f => f.filterType === SymbolFilterType.PRICE_FILTER) as { tickSize?: string };
-  const tick = pf?.tickSize ?? '0.01';
-  return parseFloat(tick);
+
+export interface Candle {
+  openTime: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
-async function fpriceStep(ticker: string): Promise<number> {
-  const info = await client.futuresExchangeInfo();
-  const sym = info.symbols.find(x => x.symbol === ticker);
-  const pf = sym?.filters.find(f => f.filterType === SymbolFilterType.PRICE_FILTER) as { tickSize?: string };
-  const tick = pf?.tickSize ?? '0.01';
-  return parseFloat(tick);
-}
-
-// Fetch recent candlestick data
-async function getCandles(
+export async function getCandles(
   symbol: string,
   interval: CandleChartInterval,
   limit: number,
-): Promise<{ openTime: number; open: number; high: number; low: number; close: number; volume: number }[]> {
+): Promise<Candle[]> {
   const raw = await client.candles({ symbol, interval, limit });
-  return raw.map(c => ({
+  return raw.map((c) => ({
     openTime: c.openTime,
     open: parseFloat(c.open),
     high: parseFloat(c.high),
@@ -142,56 +148,18 @@ async function getCandles(
     volume: parseFloat(c.volume),
   }));
 }
-/**
- * Place a USDT-M futures order.
- * @param options Futures order payload (symbol, side, type, etc.)
- */
-async function futuresOrder(options: any): Promise<any> {
-  console.log('exectute order')
-  console.log(options)
+
+/** Place a USDT-M futures order. */
+export async function futuresOrder(
+  options: NewFuturesOrder,
+): Promise<FuturesOrder> {
+  logger.log(
+    `Futures order: ${options.side} ${'quantity' in options ? options.quantity : ''} ${options.symbol} (${options.positionSide ?? 'BOTH'})`,
+  );
   return client.futuresOrder(options);
 }
-/**
- * Cancel a USDT-M futures order.
- * @param options options containing symbol and orderId or origClientOrderId
- */
-async function futuresCancelOrder(options: any): Promise<any> {
-  return client.futuresCancelOrder(options);
-}
-/**
- * Fetch current futures position risks, including entry price and position amount.
- */
-async function futuresPositionRisk(): Promise<any> {
+
+/** Current futures position risks, including entry price and position amount. */
+export async function futuresPositionRisk(): Promise<PositionRiskResult[]> {
   return client.futuresPositionRisk();
 }
-/**
- * Fetch USDT-M futures account info (e.g., margin ratio).
- */
-async function futuresAccountInfo(): Promise<any> {
-  return client.futuresAccountInfo();
-}
-
-async function marginRatio():Promise<number> {
-  const a = await futuresAccountInfo();
-  return parseFloat(a.totalInitialMargin) / parseFloat(a.totalMarginBalance);
-}
-
-export {
-  get_price,
-  buy,
-  sell,
-  step,
-  fstep,
-  base_currency_balance,
-  totalBalanceUSDT,
-  freeBalanceUSDT,
-  futuresBalanceUSDT,
-  priceStep,
-  getCandles,
-  futuresOrder,
-  futuresCancelOrder,
-  futuresPositionRisk,
-  fpriceStep,
-  // futuresAccountInfo,
-  marginRatio
-};

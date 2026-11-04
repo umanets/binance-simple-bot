@@ -1,23 +1,16 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Type } from 'class-transformer';
-import { IsString, IsIn, IsNumber, IsOptional } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class TWAlertDto {
   @IsString()
   ticker: string;
 
-  @IsIn(['aBuy', 'aSell', 'fBuy', 'fSell', 'dBuy', 'dSell'])
-  direction: 'aBuy' | 'aSell' | 'fBuy' | 'fSell' | 'dBuy' | 'dSell';
+  @IsIn(['aBuy', 'aSell', 'fBuy', 'fSell'])
+  direction: 'aBuy' | 'aSell' | 'fBuy' | 'fSell';
 
-  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   price: number;
-  
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  sl: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -60,9 +53,11 @@ export class TWAlertDto {
   @Type(() => Number)
   @IsNumber()
   tfLowerVal?: number;
+
   @IsOptional()
   @IsString()
   tf1Dir?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -123,7 +118,7 @@ export class TWAlertDto {
   @Type(() => Number)
   @IsNumber()
   tf5UpperVal?: number;
-  
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import * as fs from 'fs';
+import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
+import { ensureJsonFile, readJsonArray, writeJsonArray } from '../json-store';
 
 export interface SignalLogEntry {
   timestamp: string;
@@ -32,74 +32,56 @@ export interface SignalLogEntry {
   }[];
 }
 
+export type LabeledSignalEntry = SignalLogEntry & { profit: number };
+
 const SIGNAL_LOG_PATH = path.resolve(__dirname, '../../data/signals_log.json');
 // File to hold labeled signals (original signal + profit)
-const LABELED_SIGNALS_PATH = path.resolve(__dirname, '../../data/signals_log_labeled.json');
+const LABELED_SIGNALS_PATH = path.resolve(
+  __dirname,
+  '../../data/signals_log_labeled.json',
+);
 
 @Injectable()
 export class SignalLoggerService {
+  private readonly logger = new Logger(SignalLoggerService.name);
   private filePath = SIGNAL_LOG_PATH;
   private labeledFilePath = LABELED_SIGNALS_PATH;
 
   constructor() {
-    if (!fs.existsSync(this.filePath)) {
-      fs.writeFileSync(this.filePath, '[]');
-    }
-    // Ensure labeled signals file exists
-    if (!fs.existsSync(this.labeledFilePath)) {
-      fs.writeFileSync(this.labeledFilePath, '[]');
-    }
+    ensureJsonFile(this.filePath);
+    ensureJsonFile(this.labeledFilePath);
   }
 
   async appendSignal(entry: SignalLogEntry): Promise<void> {
-    try {
-      const text = await fs.promises.readFile(this.filePath, 'utf-8');
-      const arr = JSON.parse(text) as SignalLogEntry[];
-      arr.push(entry);
-      await fs.promises.writeFile(
-        this.filePath,
-        JSON.stringify(arr, null, 2)
-      );
-    } catch {
-      await fs.promises.writeFile(
-        this.filePath,
-        JSON.stringify([entry], null, 2)
-      );
-    }
+    const signals = await readJsonArray<SignalLogEntry>(this.filePath);
+    signals.push(entry);
+    await writeJsonArray(this.filePath, signals);
   }
+
   /**
-   * Label a signal with its profit and write to labeled file.
+   * Label a signal with its realized profit and write it to the labeled
+   * file, replacing any previous label for the same signal.
    */
   async labelSignal(
     ticker: string,
     timestamp: string,
-    profit: number
+    profit: number,
   ): Promise<void> {
-    try {
-      // Read original signals
-      const raw = await fs.promises.readFile(this.filePath, 'utf-8');
-      const signals = JSON.parse(raw) as SignalLogEntry[];
-      const sig = signals.find(s => s.ticker === ticker && s.timestamp === timestamp);
-      if (!sig) {
-        console.warn(`SignalLoggerService: signal not found for labeling ${ticker}@${timestamp}`);
-        return;
-      }
-      // Read existing labeled entries
-      const rawLabeled = await fs.promises.readFile(this.labeledFilePath, 'utf-8');
-      const labeledArr = JSON.parse(rawLabeled) as any[];
-      // Filter out any existing label for this signal
-      const updated = labeledArr.filter(
-        r => !(r.ticker === ticker && r.timestamp === timestamp)
-      );
-      // Append new labeled record
-      const newRecord = { ...sig, profit };
-      updated.push(newRecord);
-      await fs.promises.writeFile(
-        this.labeledFilePath,
-        JSON.stringify(updated, null, 2)
-      );
-    } catch (err) {
-      console.error('Error in labelSignal:', err);
+    const signals = await readJsonArray<SignalLogEntry>(this.filePath);
+    const sig = signals.find(
+      (s) => s.ticker === ticker && s.timestamp === timestamp,
+    );
+    if (!sig) {
+      this.logger.warn(`Signal not found for labeling ${ticker}@${timestamp}`);
+      return;
     }
+    const labeled = await readJsonArray<LabeledSignalEntry>(
+      this.labeledFilePath,
+    );
+    const updated = labeled.filter(
+      (r) => !(r.ticker === ticker && r.timestamp === timestamp),
+    );
+    updated.push({ ...sig, profit });
+    await writeJsonArray(this.labeledFilePath, updated);
   }
 }

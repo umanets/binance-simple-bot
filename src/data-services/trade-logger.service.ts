@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Injectable } from '@nestjs/common';
-import * as fs from 'fs';
 import * as path from 'path';
+import { ensureJsonFile, readJsonArray, writeJsonArray } from '../json-store';
 
 const TRADE_LOG_PATH = path.resolve(__dirname, '../../data/trades.json');
 
@@ -17,24 +16,17 @@ export class TradeLoggerService {
   private filePath = TRADE_LOG_PATH;
 
   constructor() {
-    if (!fs.existsSync(this.filePath)) {
-      fs.writeFileSync(this.filePath, '[]');
-    }
+    ensureJsonFile(this.filePath);
   }
 
   async appendTrade(trade: TradeLogEntry): Promise<void> {
     const trades = await this.getAllTrades();
     trades.push(trade);
-    await fs.promises.writeFile(this.filePath, JSON.stringify(trades, null, 2));
+    await writeJsonArray(this.filePath, trades);
   }
 
   async getAllTrades(): Promise<TradeLogEntry[]> {
-    try {
-      const text = await fs.promises.readFile(this.filePath, 'utf-8');
-      return JSON.parse(text) as TradeLogEntry[];
-    } catch {
-      return [];
-    }
+    return readJsonArray<TradeLogEntry>(this.filePath);
   }
 
   async removeTrades(tradesToRemove: TradeLogEntry[]): Promise<void> {
@@ -45,9 +37,6 @@ export class TradeLoggerService {
     const filtered = all.filter(
       (t) => !toRemoveSet.has(`${t.ticker}|${t.qty}|${t.price}|${t.time}`),
     );
-    await fs.promises.writeFile(
-      this.filePath,
-      JSON.stringify(filtered, null, 2),
-    );
+    await writeJsonArray(this.filePath, filtered);
   }
 }

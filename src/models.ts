@@ -1,4 +1,4 @@
-interface PredictionRecord {
+export interface PredictionRecord {
   ticker: string;
   entry: number;
   stop_loss: number;
@@ -9,7 +9,7 @@ interface PredictionRecord {
   timestamp: string;
 }
 
-interface OrderLog {
+export interface OrderLog {
   ticker: string;
   /** Original signal timestamp (from SignalLogEntry.timestamp) */
   signalTime: string;

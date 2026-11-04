@@ -25,7 +25,6 @@
     "binance-api-node": "^0.12.9",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
-    "concurrently": "^9.1.2",
     "decimal.js": "^10.6.0",
     "dotenv": "^16.5.0",
     "openai": "^4.96.0",
@@ -33,6 +32,7 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
     "@nestjs/cli": "^11.0.0",

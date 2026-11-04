@@ -1,18 +1,20 @@
 # Binance Simple Signal Executor Bot
 
 > **Status / disclaimer:** this is a demo-grade executor, not production trading software.
-> Money math uses decimal.js with exact lot/tick quantization and LLM predictions are
-> schema- and bounds-validated before any order is placed, but the trading logic has no
-> automated test coverage and exchange errors are logged rather than halting the service.
+> Money math uses decimal.js with exact lot/tick quantization, LLM predictions are
+> schema- and bounds-validated before any order is placed, and the pure sizing/validation
+> logic plus the futures rebalancing flow are covered by unit tests. The spot trading flow
+> has no end-to-end test coverage, and failed orders surface as `{status:'error'}` webhook
+> responses rather than halting the service.
 > Use it as a reference implementation; harden and test before trading real funds.
 
 ## Description
 
-This is a minimal REST backend service built with NestJS designed to act as a signal endpoint and trade executor for spot Binance accounts.
+This is a minimal REST backend service built with NestJS designed to act as a signal endpoint and trade executor for Binance spot and USDT-M futures accounts.
 
 - **No strategies or indicators are included or executed in this code.**
 - Receives buy/sell requests as standardized webhook payloads (for example, from TradingView or external script).
-- Executes spot buy or sell operations on Binance.
+- Executes spot buy/sell operations (`aBuy`/`aSell`) and futures long/short management (`fBuy`/`fSell`) on Binance.
 - Logs each buy trade to a local JSON file.
 - Aggregates, retrieves, and deletes buy records to handle sells accurately.
 - Implements basic protection to avoid selling at a loss (commission-aware).
@@ -61,8 +63,8 @@ This is a minimal REST backend service built with NestJS designed to act as a si
 
 **Payload parameters:**
 - `ticker`: **String** — trading pair, e.g. `"BTCUSDT"`
-- `direction`: **String** — `"aBuy"` or `"aSell"`
-- `price`: **Number** — the asset price at signal time (recorded for logging)
+- `direction`: **String** — `"aBuy"` / `"aSell"` (spot) or `"fBuy"` / `"fSell"` (USDT-M futures)
+- `price`: **Number** — the asset price at signal time (required; used as the entry reference for futures sizing)
 - `buyCoef`: **Number** — multi-timeframe buy confidence coefficient
 - `sellCoef`: **Number** — multi-timeframe sell confidence coefficient
 - `atr`: **Number** — normalized ATR (e.g. ATR(14)/price)
@@ -94,10 +96,16 @@ This is a minimal REST backend service built with NestJS designed to act as a si
     - If no eligible orders to sell, record a *ghost sell* entry `{ticker, price}` in `ghost_sell_trades.json`.
     - Otherwise, place a sell order, remove consumed buy-log entries, store any leftovers, clear any ghost entries for that ticker, and perform dust cleanup.
 
+- On a futures signal (direction: "fBuy" or "fSell"), the bot manages the corresponding hedge-mode side for the symbol:
+    - Resets the whole symbol position when total PnL reaches the configured share of the deposit (1% by default).
+    - Takes profit on the counter side and spends half of it reducing losing positions on the signal side.
+    - Skips re-entry until price has moved a Fibonacci-bucketed percentage away from the average entry, otherwise opens a new market lot sized from the signal coefficient and futures wallet balance (`SIZE_OF_DEPO` env is the fallback deposit size).
+    - No stop-loss or take-profit orders are placed; exits happen only through the PnL reset and profit-taking rules.
+
 ## What this service is NOT
-- No signal generation or strategy logic—signals (`aBuy`/`aSell` + coefficients) must come from external sources (e.g. TradingView).
+- No signal generation or strategy logic—signals (directions + coefficients) must come from external sources (e.g. TradingView).
 - You must provide the signal source (e.g. a TradingView webhook, custom script, or other automation).
-- Not suitable for futures/margin trading. Only supports spot Binance.
+- The webhook endpoint is unauthenticated — run it behind a firewall/tunnel you control and never expose it to the public internet.
   
 ---
   
@@ -116,7 +124,9 @@ In addition to executing raw webhook signals, this bot now includes an OpenAI-ba
 
 ## Live Prediction Executor
 
-The `PredictionExecutorService` dynamically watches `predictions.json` and manages Binance WebSocket subscriptions:
+The `PredictionExecutorService` dynamically watches `predictions.json` and manages Binance WebSocket subscriptions.
+
+> **Disabled by default.** Set `ENABLE_PREDICTION_EXECUTOR=true` in the environment to let it trade LLM predictions live; otherwise it only logs that it is off.
 
 - **Dynamic Subscriptions**: Automatically subscribes to new tickers and unsubscribes removed ones via `fs.watch`.
 - **Automated BUY**: When price ≤ `entry` and `executed=false`, it places a market BUY of `(2 × minNotional/price)`, aligns to lot size, sets `executed=true`, and records actual fill quantity and average price.
