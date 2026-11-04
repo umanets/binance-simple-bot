@@ -19,17 +19,19 @@ const ORDERS_LOG_PATH = path.resolve(
 @Injectable()
 export class PredictionLoggerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PredictionLoggerService.name);
+  private predictionsPath = PREDICTIONS_PATH;
+  private ordersLogPath = ORDERS_LOG_PATH;
   private watcher?: fs.FSWatcher;
 
   constructor(private eventEmitter: EventEmitter2) {}
 
   onModuleInit() {
-    ensureJsonFile(ORDERS_LOG_PATH);
+    ensureJsonFile(this.ordersLogPath);
     // Ensure predictions file exists before watching
-    ensureJsonFile(PREDICTIONS_PATH);
+    ensureJsonFile(this.predictionsPath);
 
     try {
-      this.watcher = fs.watch(PREDICTIONS_PATH, (eventType) => {
+      this.watcher = fs.watch(this.predictionsPath, (eventType) => {
         if (eventType === 'change') {
           this.eventEmitter.emit('predictions.changed');
         }
@@ -53,20 +55,20 @@ export class PredictionLoggerService implements OnModuleInit, OnModuleDestroy {
       (r) => !(r.ticker === record.ticker && r.executed === false),
     );
     updated.push(record);
-    await writeJsonArray(PREDICTIONS_PATH, updated);
+    await writeJsonArray(this.predictionsPath, updated);
   }
 
   async persistPredictions(predictions: PredictionRecord[]): Promise<void> {
-    await writeJsonArray(PREDICTIONS_PATH, predictions);
+    await writeJsonArray(this.predictionsPath, predictions);
   }
 
   async getPredictions(): Promise<PredictionRecord[]> {
-    return readJsonArray<PredictionRecord>(PREDICTIONS_PATH);
+    return readJsonArray<PredictionRecord>(this.predictionsPath);
   }
 
   async persistOrderLog(log: OrderLog): Promise<void> {
-    const orders = await readJsonArray<OrderLog>(ORDERS_LOG_PATH);
+    const orders = await readJsonArray<OrderLog>(this.ordersLogPath);
     orders.push(log);
-    await writeJsonArray(ORDERS_LOG_PATH, orders);
+    await writeJsonArray(this.ordersLogPath, orders);
   }
 }

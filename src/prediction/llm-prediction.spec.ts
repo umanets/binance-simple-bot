@@ -1,5 +1,5 @@
 import { extractZigZag, parseLlmPrediction } from './llm-prediction';
-import { SignalLogEntry } from './data-services/signal-logger.service';
+import { SignalLogEntry } from '../data-services/signal-logger.service';
 
 const signal = { ticker: 'BTCUSDT', price: 100 } as SignalLogEntry;
 

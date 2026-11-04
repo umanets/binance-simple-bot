@@ -10,7 +10,7 @@ import {
   SignalLoggerService,
   SignalLogEntry,
 } from './data-services/signal-logger.service';
-import { PredictionService } from './prediction.service';
+import { PredictionService } from './prediction/prediction.service';
 import { calcK, calcLocalGlobalPower, fibonacci } from './signal-math';
 import { D, floorToStep } from './money';
 import * as binance from './binance';

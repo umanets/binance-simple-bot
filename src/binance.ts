@@ -34,7 +34,7 @@ export async function getPrice(ticker: string): Promise<number> {
 }
 
 /** Sell at a fixed price with a LIMIT order (good-till-cancelled). */
-export async function limitSell(
+export function limitSell(
   ticker: string,
   qty: number,
   limitPrice: number,
@@ -51,7 +51,7 @@ export async function limitSell(
 }
 
 /** Buy immediately at market price with a MARKET order. */
-export async function marketBuy(ticker: string, qty: number): Promise<Order> {
+export function marketBuy(ticker: string, qty: number): Promise<Order> {
   const payload = {
     symbol: ticker,
     side: 'BUY',
@@ -200,9 +200,7 @@ export async function getCandles(
 }
 
 /** Place a USDT-M futures order. */
-export async function futuresOrder(
-  options: NewFuturesOrder,
-): Promise<FuturesOrder> {
+export function futuresOrder(options: NewFuturesOrder): Promise<FuturesOrder> {
   logger.log(
     `Futures order: ${options.side} ${'quantity' in options ? options.quantity : ''} ${options.symbol} (${options.positionSide ?? 'BOTH'})`,
   );
@@ -210,6 +208,6 @@ export async function futuresOrder(
 }
 
 /** Current futures position risks, including entry price and position amount. */
-export async function futuresPositionRisk(): Promise<PositionRiskResult[]> {
+export function futuresPositionRisk(): Promise<PositionRiskResult[]> {
   return client.futuresPositionRisk();
 }

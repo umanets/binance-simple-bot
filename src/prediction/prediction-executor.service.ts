@@ -6,18 +6,21 @@ import {
 } from '@nestjs/common';
 import { OrderType, TimeInForce } from 'binance-api-node';
 import { OnEvent } from '@nestjs/event-emitter';
-import { SignalLoggerService } from './data-services/signal-logger.service';
-import { PredictionLoggerService } from './data-services/prediction-logger.service';
-import { PredictionRecord } from './models';
-import { D, floorToStep } from './money';
-import * as binance from './binance';
-import { client } from './binance';
+import { SignalLoggerService } from '../data-services/signal-logger.service';
+import { PredictionLoggerService } from '../data-services/prediction-logger.service';
+import { PredictionRecord } from '../models';
+import { D, floorToStep } from '../money';
+import * as binance from '../binance';
+import { client } from '../binance';
 
 interface SymbolFilters {
   minNotional: number;
   stepSize: number;
   tickSize: number;
 }
+
+/** Binance API error code for "Account has insufficient balance". */
+export const BINANCE_INSUFFICIENT_BALANCE = -2010;
 
 function errorDetail(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
@@ -206,7 +209,9 @@ export class PredictionExecutorService
             });
           } catch (err: unknown) {
             // If no balance, remove prediction and unsubscribe to stop retries
-            if ((err as { code?: number }).code === -2010) {
+            if (
+              (err as { code?: number }).code === BINANCE_INSUFFICIENT_BALANCE
+            ) {
               this.logger.warn(
                 `Insufficient balance for ${ticker}, removing pending sell and unsubscribing`,
               );

@@ -63,6 +63,18 @@ This is a minimal REST backend service built with NestJS designed to act as a si
     ```
 4. (Optional) Adjust webhook route or log file path in code if necessary.
 
+### Scripts
+
+| Script | What it does |
+|--------|--------------|
+| `npm run build` | Compile with the Nest CLI into `dist/` |
+| `npm run start` | Start the webhook server (port `PORT`, default 3000) |
+| `npm test` | Run the unit test suite |
+| `npm run test:e2e` | Run the webhook pipeline tests in `test/` |
+| `npm run test:cov` | Unit tests with coverage report |
+| `npm run lint` | ESLint with autofix over `src/` and `test/` |
+| `npm run format` | Prettier over the source tree |
+
 ---
 
 ## Usage

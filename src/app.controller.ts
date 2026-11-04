@@ -45,6 +45,10 @@ export class AppController {
             status: 'ok',
             data: await this.futuresTrades.openShort(request),
           };
+        // Unreachable while the DTO union stays in sync, but guards the
+        // boundary if validation is ever bypassed or the union grows
+        default:
+          return { status: 'error', error: 'Unsupported direction' };
       }
     } catch (e: unknown) {
       this.logger.error(

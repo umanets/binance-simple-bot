@@ -56,26 +56,46 @@ function clamp01(value: number): number {
 }
 
 /**
- * Signed score in [-1..1] for the price's position inside one EMA band.
+ * Proximity of the price inside the band, in [0..1]; 0 when the band is
+ * degenerate (upper <= lower).
+ */
+function bandProximity(band: TimeframeBand, price: number): number {
+  const span = band.upper - band.lower;
+  if (span <= 0) return 0;
+  return clamp01((price - band.lower) / span);
+}
+
+/**
  * Inner-band directions scale by proximity: isInnerUp (0..1),
- * isInnerDown (0..-1), legacy isInner (-1..+1). Plain up/down directions
- * contribute their sign scaled by proximity inside the band.
+ * isInnerDown (0..-1), legacy isInner (-1..+1).
+ */
+function innerBandScore(band: TimeframeBand, price: number): number {
+  const span = band.upper - band.lower;
+  if (span <= 0) return 0;
+  const pNorm = bandProximity(band, price);
+  if (band.dir === 'isInnerUp') return pNorm;
+  if (band.dir === 'isInnerDown') return -pNorm;
+  return pNorm * 2 - 1;
+}
+
+/** Directional sign of a band label: up = 1, down = -1, unknown = 0. */
+function bandDirection(dir: string): number {
+  const s = dir.toLowerCase();
+  if (s.includes('up')) return 1;
+  if (s.includes('down')) return -1;
+  return 0;
+}
+
+/**
+ * Signed score in [-1..1] for the price's position inside one EMA band.
+ * Plain up/down directions contribute their sign scaled by proximity
+ * inside the band; isInner* variants scale by proximity directly.
  */
 function bandScore(band: TimeframeBand, price: number): number {
-  const span = band.upper - band.lower;
   if (band.dir.startsWith('isInner')) {
-    if (span <= 0) return 0;
-    const pNorm = clamp01((price - band.lower) / span);
-    if (band.dir === 'isInnerUp') return pNorm;
-    if (band.dir === 'isInnerDown') return -pNorm;
-    return pNorm * 2 - 1;
+    return innerBandScore(band, price);
   }
-  const s = band.dir.toLowerCase();
-  let dir = 0;
-  if (s.includes('up')) dir = 1;
-  else if (s.includes('down')) dir = -1;
-  if (dir === 0 || span <= 0) return 0;
-  return dir * clamp01((price - band.lower) / span);
+  return bandDirection(band.dir) * bandProximity(band, price);
 }
 
 function timeframeBands(request: TWAlertDto): TimeframeBand[] {

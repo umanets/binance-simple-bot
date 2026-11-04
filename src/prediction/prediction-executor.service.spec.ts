@@ -1,11 +1,14 @@
-jest.mock('./binance', () => ({
+jest.mock('../binance', () => ({
   client: { order: jest.fn(), ws: { trades: jest.fn() } },
   spotSymbolFilters: jest.fn(),
 }));
 
-import { client } from './binance';
-import { PredictionExecutorService } from './prediction-executor.service';
-import { PredictionRecord } from './models';
+import { client } from '../binance';
+import {
+  BINANCE_INSUFFICIENT_BALANCE,
+  PredictionExecutorService,
+} from './prediction-executor.service';
+import { PredictionRecord } from '../models';
 
 const orderMock = (client as unknown as { order: jest.Mock }).order;
 
@@ -130,7 +133,9 @@ describe('PredictionExecutorService price handling', () => {
       }),
     ];
     orderMock.mockRejectedValue(
-      Object.assign(new Error('no balance'), { code: -2010 }),
+      Object.assign(new Error('no balance'), {
+        code: BINANCE_INSUFFICIENT_BALANCE,
+      }),
     );
 
     await internals.handlePrice('FOO', 121);

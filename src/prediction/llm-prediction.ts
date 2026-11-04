@@ -1,4 +1,4 @@
-import { SignalLogEntry } from './data-services/signal-logger.service';
+import { SignalLogEntry } from '../data-services/signal-logger.service';
 
 /** Shape the LLM is required to return (see PredictionService.buildPrompt). */
 export interface LlmPrediction {

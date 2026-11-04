@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
-import { SignalLogEntry } from './data-services/signal-logger.service';
-import { PredictionLoggerService } from './data-services/prediction-logger.service';
-import { PredictionRecord } from './models';
+import { SignalLogEntry } from '../data-services/signal-logger.service';
+import { PredictionLoggerService } from '../data-services/prediction-logger.service';
+import { PredictionRecord } from '../models';
 import { extractZigZag, parseLlmPrediction } from './llm-prediction';
 
 @Injectable()

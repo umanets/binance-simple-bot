@@ -6,8 +6,8 @@ import { FuturesTradeService } from './futures-trade.service';
 import { TradeLoggerService } from './data-services/trade-logger.service';
 import { GhostTradeService } from './data-services/ghost-trade.service';
 import { SignalLoggerService } from './data-services/signal-logger.service';
-import { PredictionService } from './prediction.service';
-import { PredictionExecutorService } from './prediction-executor.service';
+import { PredictionService } from './prediction/prediction.service';
+import { PredictionExecutorService } from './prediction/prediction-executor.service';
 import { PredictionLoggerService } from './data-services/prediction-logger.service';
 
 @Module({
