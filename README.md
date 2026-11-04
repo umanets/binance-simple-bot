@@ -1,5 +1,10 @@
 # Binance Simple Signal Executor Bot
 
+> **Status / disclaimer:** this is a demo-grade executor, not production trading software.
+> Quantity/PnL math uses plain floating point (no decimal library), errors from the
+> exchange are logged rather than halting the service, and LLM-assisted signals are not
+> schema-validated. Use it as a reference implementation; harden before trading real funds.
+
 ## Description
 
 This is a minimal REST backend service built with NestJS designed to act as a signal endpoint and trade executor for spot Binance accounts.
